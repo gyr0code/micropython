@@ -189,12 +189,17 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
 }
 
+void Error_Handler(void){
+    printf("ERROR!");
+}
 
 typedef struct _pyb_obj_adc_t {
     mp_obj_base_t base;
     mp_obj_t pin_name;
     int channel;
     ADC_HandleTypeDef handle;
+    ADC_HandleTypeDef handle2;
+    ADC_HandleTypeDef handle3;
 } pyb_obj_adc_t;
 
 // convert user-facing channel number into internal channel number
@@ -242,6 +247,7 @@ STATIC void adc_wait_for_eoc_or_timeout(int32_t timeout) {
 STATIC void adcx_clock_enable(void) {
 #if defined(STM32F0) || defined(STM32F4) || defined(STM32F7)
     ADCx_CLK_ENABLE();
+
 #elif defined(STM32H7)
     __HAL_RCC_ADC3_CLK_ENABLE();
     __HAL_RCC_ADC_CONFIG(RCC_ADCCLKSOURCE_CLKP);
@@ -252,6 +258,67 @@ STATIC void adcx_clock_enable(void) {
 #endif
 }
 
+STATIC void adc_tripleclk_enable(void){
+    __HAL_RCC_ADC1_CLK_ENABLE();
+    __HAL_RCC_ADC2_CLK_ENABLE();
+    __HAL_RCC_ADC3_CLK_ENABLE();
+}
+
+STATIC void adc_triple_init_periph(ADC_HandleTypeDef *adch, ADC_HandleTypeDef *adch2, ADC_HandleTypeDef *adch3){
+    
+    adc_tripleclk_enable();
+    
+    adch3->Instance                   = ADC3;
+
+    adch3->Init.Resolution            = ADC_RESOLUTION_12B;
+    adch3->Init.ContinuousConvMode    = ENABLE;
+    adch3->Init.DiscontinuousConvMode = DISABLE;
+    adch3->Init.EOCSelection          = DISABLE;
+    adch3->Init.ExternalTrigConv      = ADC_EXTERNALTRIGCONV_T1_CC1;
+    adch3->Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
+    adch3->Init.ClockPrescaler        = ADC_CLOCK_SYNC_PCLK_DIV2;
+    adch3->Init.ScanConvMode          = DISABLE;
+    adch3->Init.DataAlign             = ADC_DATAALIGN_RIGHT;
+    adch3->Init.DMAContinuousRequests = DISABLE;
+    
+    if(HAL_ADC_Init(adch3) != HAL_OK){
+        Error_Handler();
+    }
+    
+    adch2->Instance                   = ADC2;
+
+    adch2->Init.Resolution            = ADC_RESOLUTION_12B;
+    adch2->Init.ContinuousConvMode    = ENABLE;
+    adch2->Init.DiscontinuousConvMode = DISABLE;
+    adch2->Init.EOCSelection          = DISABLE;
+    adch2->Init.ExternalTrigConv      = ADC_EXTERNALTRIGCONV_T1_CC1;
+    adch2->Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
+    adch2->Init.ClockPrescaler        = ADC_CLOCK_SYNC_PCLK_DIV2;
+    adch2->Init.ScanConvMode          = DISABLE;
+    adch2->Init.DataAlign             = ADC_DATAALIGN_RIGHT;
+    adch2->Init.DMAContinuousRequests = DISABLE;
+
+    if(HAL_ADC_Init(adch2) != HAL_OK){
+        Error_Handler();
+    }
+    adch->Instance                   = ADC1;
+
+    adch->Init.Resolution            = ADC_RESOLUTION_12B;
+    adch->Init.ContinuousConvMode    = ENABLE; 
+    adch->Init.DiscontinuousConvMode = DISABLE;
+    adch->Init.EOCSelection          = DISABLE;
+    adch->Init.ExternalTrigConv      = ADC_EXTERNALTRIGCONV_T1_CC1;
+    adch->Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
+    adch->Init.ClockPrescaler        = ADC_CLOCK_SYNC_PCLK_DIV2;
+    adch->Init.ScanConvMode          = DISABLE;
+    adch->Init.DataAlign             = ADC_DATAALIGN_RIGHT;
+    adch->Init.DMAContinuousRequests = ENABLE;
+
+    if(HAL_ADC_Init(adch) != HAL_OK){
+        Error_Handler();
+    }
+
+}
 
 STATIC void adcx_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution) {
     adcx_clock_enable();
@@ -318,6 +385,22 @@ STATIC void adcx_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution) {
 
 }
 
+STATIC void adc_init_triple(pyb_obj_adc_t *adc_obj) {
+    
+    if (!is_adcx_channel(adc_obj->channel)) {
+        return;
+    }
+
+    if (ADC_FIRST_GPIO_CHANNEL <= adc_obj->channel && adc_obj->channel <= ADC_LAST_GPIO_CHANNEL) {
+        // Channels 0-16 correspond to real pins. Configure the GPIO pin in ADC mode.
+        const pin_obj_t *pin = pin_adc_table[adc_obj->channel];
+        mp_hal_pin_config(pin, MP_HAL_PIN_MODE_ADC, MP_HAL_PIN_PULL_NONE, 0);
+    }
+
+    adc_triple_init_periph(&adc_obj->handle,&adc_obj->handle2,&adc_obj->handle3);
+
+}
+
 STATIC void adc_init_single(pyb_obj_adc_t *adc_obj) {
     if (!is_adcx_channel(adc_obj->channel)) {
         return;
@@ -349,7 +432,7 @@ STATIC void adc_config_channel(ADC_HandleTypeDef *adc_handle, uint32_t channel) 
 #if defined(STM32F0)
     sConfig.SamplingTime = ADC_SAMPLETIME_71CYCLES_5;
 #elif defined(STM32F4) || defined(STM32F7)
-    sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
+    sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES; // DMA ADDITION
 #elif defined(STM32H7)
     if (channel == ADC_CHANNEL_VREFINT
         || channel == ADC_CHANNEL_TEMPSENSOR
@@ -427,11 +510,10 @@ STATIC void adc_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t
 /// This allows you to then read analog values on that pin.
 STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     // check number of arguments
-    mp_arg_check_num(n_args, n_kw, 1, 1, false);
+    mp_arg_check_num(n_args, n_kw, 2, 2, false);
 
     // 1st argument is the pin name
     mp_obj_t pin_obj = args[0];
-
     uint32_t channel;
 
     if (mp_obj_is_int(pin_obj)) {
@@ -463,8 +545,13 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     o->base.type = &pyb_adc_type;
     o->pin_name = pin_obj;
     o->channel = channel;
-    adc_init_single(o);
-
+    
+    if(mp_obj_is_true(args[1])){
+        adc_init_triple(o);
+    }
+    else{
+        adc_init_single(o);
+    }
     return MP_OBJ_FROM_PTR(o);
 }
 
@@ -612,6 +699,49 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_dma_obj, adc_read_dma);
 
+STATIC mp_obj_t adc_read_interleaved(mp_obj_t self_in) {
+
+    pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
+    
+    __IO uint32_t tripleADCConvVals[DMA_BUFFER_SIZE];
+    int i;
+
+    for (i=0;i<DMA_BUFFER_SIZE;i++){
+        tripleADCConvVals[i] = 0;
+    }
+
+    // configure the ADC channel
+    adc_config_channel(&self->handle, self->channel);
+    adc_config_channel(&self->handle2, self->channel);
+    adc_config_channel(&self->handle3, self->channel);
+    
+    ADC_MultiModeTypeDef mode;
+    mode.Mode = ADC_TRIPLEMODE_INTERL;
+    mode.DMAAccessMode = ADC_DMAACCESSMODE_2;
+    mode.TwoSamplingDelay = ADC_TWOSAMPLINGDELAY_5CYCLES;
+    
+    if (HAL_ADCEx_MultiModeConfigChannel(&self->handle, &mode) != HAL_OK) {
+        /* Multimode Configuration Error */
+        Error_Handler();
+    }
+
+    if (HAL_ADC_Start(&self->handle3) != HAL_OK) {
+        Error_Handler();
+    }
+
+    if (HAL_ADC_Start(&self->handle2) != HAL_OK) {
+        Error_Handler();
+    }
+
+    if (HAL_ADCEx_MultiModeStart_DMA(&self->handle, (uint32_t *)tripleADCConvVals, DMA_BUFFER_SIZE) != HAL_OK) {
+        Error_Handler();
+    }
+
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_interleaved_obj, adc_read_interleaved);
+
 // read_timed_multi((adcx, adcy, ...), (bufx, bufy, ...), timer)
 //
 // Read analog values from multiple ADC's into buffers at a rate set by the
@@ -718,8 +848,9 @@ STATIC MP_DEFINE_CONST_STATICMETHOD_OBJ(adc_read_timed_multi_obj, MP_ROM_PTR(&ad
 
 STATIC const mp_rom_map_elem_t adc_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&adc_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_read_timed), MP_ROM_PTR(&adc_read_timed_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_dma), MP_ROM_PTR(&adc_read_dma_obj) },
+    { MP_ROM_QSTR(MP_QSTR_read_timed), MP_ROM_PTR(&adc_read_timed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_read_interleaved), MP_ROM_PTR(&adc_read_interleaved_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_timed_multi), MP_ROM_PTR(&adc_read_timed_multi_obj) },
 };
 
