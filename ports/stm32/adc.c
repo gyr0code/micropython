@@ -178,7 +178,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
         led_toggle(PYB_LED_RED);
         }
     
-    else if (udp_counter==10000){
+    else if (udp_counter==100000){
         led_toggle(PYB_LED_GREEN);
     }
     
@@ -264,7 +264,7 @@ STATIC void adcx_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution) {
     adch->Init.NbrOfConversion       = 1;
     #endif
     adch->Init.EOCSelection          = DISABLE; // DMA CHANGE
-    adch->Init.ExternalTrigConv      = ADC_SOFTWARE_START;
+    adch->Init.ExternalTrigConv      = ADC_EXTERNALTRIGCONV_T1_CC1;
     adch->Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
     #if defined(STM32F0) || defined(STM32F4) || defined(STM32F7)
     adch->Init.ClockPrescaler        = ADC_CLOCK_SYNC_PCLK_DIV2;
@@ -592,7 +592,7 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
     int i;
 
     for (i=0;i<DMA_BUFFER_SIZE;i++){
-        ADCConvVals[i] = 0;
+        ADCConvVals[i] = 0; 
     }
 
     adc_config_channel(&self->handle, self->channel);
