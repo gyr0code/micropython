@@ -115,6 +115,18 @@ static const DMA_InitTypeDef dma_init_struct_spi_i2c = {
     #endif
 };
 
+static const DMA_InitTypeDef dma_init_struct_adc = {
+    .Channel             = DMA_CHANNEL_0,
+    .Direction           = DMA_PERIPH_TO_MEMORY,
+    .PeriphInc           = DMA_PINC_DISABLE,
+    .MemInc              = DMA_MINC_ENABLE,
+    .PeriphDataAlignment = DMA_PDATAALIGN_WORD,
+    .MemDataAlignment    = DMA_MDATAALIGN_WORD,
+    .Mode                = DMA_CIRCULAR,
+    .Priority            = DMA_PRIORITY_HIGH,
+};
+
+
 #if ENABLE_SDIO && !defined(STM32H7)
 // Parameters to dma_init() for SDIO tx and rx.
 static const DMA_InitTypeDef dma_init_struct_sdio = {
@@ -291,6 +303,7 @@ const dma_descr_t dma_SPI_1_TX = { DMA2_Stream5, DMA_CHANNEL_3, dma_id_13,  &dma
 //const dma_descr_t dma_SDMMC_2 = { DMA2_Stream5, DMA_CHANNEL_11, dma_id_13,  &dma_init_struct_sdio };
 //#endif
 const dma_descr_t dma_SPI_6_RX = { DMA2_Stream6, DMA_CHANNEL_1, dma_id_14,  &dma_init_struct_spi_i2c };
+const dma_descr_t dma_ADC_1 = { DMA2_Stream4, DMA_CHANNEL_0, dma_id_12,  &dma_init_struct_adc };
 //#if ENABLE_SDIO
 //const dma_descr_t dma_SDIO_0 = { DMA2_Stream6, DMA_CHANNEL_4, dma_id_14,  &dma_init_struct_sdio };
 //#endif

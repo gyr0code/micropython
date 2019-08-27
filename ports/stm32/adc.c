@@ -33,7 +33,8 @@
 #include "adc.h"
 #include "pin.h"
 #include "timer.h"
-
+#include "dma.h"
+#include "led.h"
 #if MICROPY_HW_ENABLE_ADC
 
 /// \moduleref pyb
@@ -165,6 +166,27 @@
 #define ADC_SCALE (ADC_SCALE_V / ((1 << ADC_CAL_BITS) - 1))
 #define VREFIN_CAL ((uint16_t *)ADC_CAL_ADDRESS)
 
+#define DMA_BUFFER_SIZE ((uint32_t)30)
+
+uint32_t udp_counter = 0;
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
+
+    NVIC_DisableIRQ(DMA2_Stream4_IRQn);
+    
+    if(udp_counter==1000){
+        led_toggle(PYB_LED_RED);
+        }
+    else if (udp_counter==100000){
+        led_toggle(PYB_LED_GREEN);
+    }
+    udp_counter++;
+    
+    NVIC_EnableIRQ(DMA2_Stream4_IRQn);
+
+}
+
+
 typedef struct _pyb_obj_adc_t {
     mp_obj_base_t base;
     mp_obj_t pin_name;
@@ -227,25 +249,26 @@ STATIC void adcx_clock_enable(void) {
 #endif
 }
 
+
 STATIC void adcx_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution) {
     adcx_clock_enable();
 
     adch->Instance                   = ADCx;
     adch->Init.Resolution            = resolution;
-    adch->Init.ContinuousConvMode    = DISABLE;
+    adch->Init.ContinuousConvMode    = ENABLE; // DMA CHANGE
     adch->Init.DiscontinuousConvMode = DISABLE;
     #if !defined(STM32F0)
     adch->Init.NbrOfDiscConversion   = 0;
     adch->Init.NbrOfConversion       = 1;
     #endif
-    adch->Init.EOCSelection          = ADC_EOC_SINGLE_CONV;
+    adch->Init.EOCSelection          = DISABLE; // DMA CHANGE
     adch->Init.ExternalTrigConv      = ADC_SOFTWARE_START;
     adch->Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
     #if defined(STM32F0) || defined(STM32F4) || defined(STM32F7)
     adch->Init.ClockPrescaler        = ADC_CLOCK_SYNC_PCLK_DIV2;
     adch->Init.ScanConvMode          = DISABLE;
     adch->Init.DataAlign             = ADC_DATAALIGN_RIGHT;
-    adch->Init.DMAContinuousRequests = DISABLE;
+    adch->Init.DMAContinuousRequests = ENABLE; // DMA CHANGE
     #elif defined(STM32H7)
     adch->Init.ClockPrescaler        = ADC_CLOCK_SYNC_PCLK_DIV4;
     adch->Init.ScanConvMode          = DISABLE;
@@ -278,6 +301,18 @@ STATIC void adcx_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution) {
     #if defined(STM32L4)
     HAL_ADCEx_Calibration_Start(adch, ADC_SINGLE_ENDED);
     #endif
+
+    static DMA_HandleTypeDef DMAHandle;
+
+    dma_deinit(&dma_SPI_4_TX);
+    dma_deinit(&dma_SPI_5_TX);
+
+    dma_init(&DMAHandle, &dma_ADC_1, DMA_PERIPH_TO_MEMORY, adch);
+    
+    printf("DMA INIT\n");
+
+    adch->DMA_Handle = &DMAHandle;
+
 }
 
 STATIC void adc_init_single(pyb_obj_adc_t *adc_obj) {
@@ -547,6 +582,27 @@ STATIC mp_obj_t adc_read_timed(mp_obj_t self_in, mp_obj_t buf_in, mp_obj_t freq_
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_3(adc_read_timed_obj, adc_read_timed);
 
+STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
+
+    pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
+
+    __IO uint32_t ADCConvVals[DMA_BUFFER_SIZE];
+
+    adc_config_channel(&self->handle, self->channel);
+
+    printf("CONFIG\n");
+
+    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)ADCConvVals, DMA_BUFFER_SIZE)!= HAL_OK){
+        printf("DMA ERROR HERE!");
+    }
+
+    while(1){}
+
+    return mp_const_none;
+
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_dma_obj, adc_read_dma);
+
 // read_timed_multi((adcx, adcy, ...), (bufx, bufy, ...), timer)
 //
 // Read analog values from multiple ADC's into buffers at a rate set by the
@@ -654,6 +710,7 @@ STATIC MP_DEFINE_CONST_STATICMETHOD_OBJ(adc_read_timed_multi_obj, MP_ROM_PTR(&ad
 STATIC const mp_rom_map_elem_t adc_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&adc_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_timed), MP_ROM_PTR(&adc_read_timed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_read_dma), MP_ROM_PTR(&adc_read_dma_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_timed_multi), MP_ROM_PTR(&adc_read_timed_multi_obj) },
 };
 
