@@ -177,9 +177,11 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
     if(udp_counter==1000){
         led_toggle(PYB_LED_RED);
         }
-    else if (udp_counter==100000){
+    
+    else if (udp_counter==10000){
         led_toggle(PYB_LED_GREEN);
     }
+    
     udp_counter++;
     
     NVIC_EnableIRQ(DMA2_Stream4_IRQn);
@@ -587,6 +589,11 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
 
     __IO uint32_t ADCConvVals[DMA_BUFFER_SIZE];
+    int i;
+
+    for (i=0;i<DMA_BUFFER_SIZE;i++){
+        ADCConvVals[i] = 0;
+    }
 
     adc_config_channel(&self->handle, self->channel);
 
@@ -596,7 +603,8 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
         printf("DMA ERROR HERE!");
     }
 
-    while(1){}
+    while(1){
+    }
 
     return mp_const_none;
 

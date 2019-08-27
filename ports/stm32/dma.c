@@ -744,6 +744,7 @@ void dma_init(DMA_HandleTypeDef *dma, const dma_descr_t *dma_descr, uint32_t dir
         HAL_DMA_DeInit(dma);
         HAL_DMA_Init(dma);
         NVIC_SetPriority(IRQn_NONNEG(dma_irqn[dma_id]), IRQ_PRI_DMA);
+
         #else
         // if this stream was previously configured for this channel/request and direction then we
         // can skip most of the initialisation
