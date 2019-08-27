@@ -178,8 +178,9 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
         led_toggle(PYB_LED_RED);
         }
     
-    else if (udp_counter==100000){
+    if (udp_counter==100000){
         led_toggle(PYB_LED_GREEN);
+        printf("LULW");
     }
     
     udp_counter++;
@@ -599,7 +600,7 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
 
     printf("CONFIG\n");
 
-    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)ADCConvVals, DMA_BUFFER_SIZE)!= HAL_OK){
+    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)ADCConvVals, 10)!= HAL_OK){
         printf("DMA ERROR HERE!");
     }
 
