@@ -386,6 +386,7 @@ STATIC void adcx_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution) {
     HAL_ADCEx_Calibration_Start(adch, ADC_SINGLE_ENDED);
     #endif
 
+    // micropython DMA init code, priority 2
     static DMA_HandleTypeDef DMAHandle;
 
     dma_deinit(&dma_SPI_4_TX);
@@ -717,16 +718,17 @@ STATIC mp_obj_t adc_read_interleaved(mp_obj_t self_in) {
 
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
 
-    // configure the ADC channel
+    // configure the three ADC channels
     adc_config_channel(&self->handle, self->channel);
     adc_config_channel(&self->handle2, self->channel);
     adc_config_channel(&self->handle3, self->channel);
-    
+    // config the triple adc mode
     ADC_MultiModeTypeDef mode;
     mode.Mode = ADC_TRIPLEMODE_INTERL;
     mode.DMAAccessMode = ADC_DMAACCESSMODE_2;
     mode.TwoSamplingDelay = ADC_TWOSAMPLINGDELAY_5CYCLES;
     
+    // link to ADC1 master ADC
     if (HAL_ADCEx_MultiModeConfigChannel(&self->handle, &mode) != HAL_OK) {
         /* Multimode Configuration Error */
         Error_Handler();
@@ -739,11 +741,10 @@ STATIC mp_obj_t adc_read_interleaved(mp_obj_t self_in) {
     if (HAL_ADC_Start(&self->handle2) != HAL_OK) {
         Error_Handler();
     }
-
+    // Start triple interleaved mode with ADC1
     if (HAL_ADCEx_MultiModeStart_DMA(&self->handle, (uint32_t *)ADCConvVals, DMA_BUFFER_SIZE) != HAL_OK) {
         Error_Handler();
     }
-
 
     return mp_const_none;
 }
