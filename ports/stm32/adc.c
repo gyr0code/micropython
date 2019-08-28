@@ -172,13 +172,14 @@
 __IO uint32_t ADCConvVals[DMA_BUFFER_SIZE];
 int bufitem;
 uint32_t udp_counter = 0;
-
 udp_send_obj_t *UDPS;
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     NVIC_DisableIRQ(DMA2_Stream4_IRQn);
-    
+
+    UDPS->errorstate = mp_send_udp(UDPS->pcb, (u32_t*)ADCConvVals, &UDPS->destip, UDPS->port, 30*4);
+    printf("%d\n", UDPS->errorstate);
 
     /*for(bufitem=0; bufitem<DMA_BUFFER_SIZE; bufitem++){
         printf("%lu\n",ADCConvVals[bufitem]);
@@ -186,7 +187,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     udp_counter++;
 
-    if(udp_counter==30){
+    if(udp_counter==5){
         HAL_ADC_Stop_DMA(adch);
         led_toggle(PYB_LED_GREEN);
     }
@@ -699,8 +700,10 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_3(adc_read_timed_obj, adc_read_timed);
 
 STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
 
-    mp_init_udp(UDPS);
+    // keep network alive?
+    //NVIC_SetPriority(ETH_IRQn, IRQ_PRI_DMA);
 
+    mp_init_udp(UDPS);
 
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
 

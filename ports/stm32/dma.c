@@ -756,7 +756,8 @@ void dma_init(DMA_HandleTypeDef *dma, const dma_descr_t *dma_descr, uint32_t dir
             // (dma->State is set to HAL_DMA_STATE_RESET by memset above)
             HAL_DMA_DeInit(dma);
             HAL_DMA_Init(dma);
-            NVIC_SetPriority(IRQn_NONNEG(dma_irqn[dma_id]), IRQ_PRI_DMA);     
+            if(dma_descr==&dma_ADC_1){NVIC_SetPriority(IRQn_NONNEG(dma_irqn[dma_id]), IRQ_PRI_ADC);}
+            else{NVIC_SetPriority(IRQn_NONNEG(dma_irqn[dma_id]), IRQ_PRI_DMA);}
             
             #if defined(STM32F0)
             if (dma->Instance < DMA2_Channel1) {

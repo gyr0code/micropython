@@ -11,14 +11,13 @@ void mp_init_udp(udp_send_obj_t *UDP){
     
     UDP->port = 9000;
     
-    sprintf(UDP->ipstring, "192.168.4.16");
-    
-    ip4addr_aton((char*)&UDP->ipstring, &UDP->destip);
+    IP4_ADDR(&UDP->destip,192,168,4,16);
 
 }
 
 
-err_t mp_send_udp(struct udp_pcb *udppcb ,const u16_t *payload, ip_addr_t *dest_ip, u16_t port, u16_t payloadsize){
+err_t mp_send_udp(struct udp_pcb *udppcb ,const u32_t *payload, ip_addr_t *dest_ip, u16_t port, u16_t payloadsize){
+
 
     struct pbuf *p;
 
