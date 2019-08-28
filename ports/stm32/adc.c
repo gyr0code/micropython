@@ -168,18 +168,35 @@
 #define VREFIN_CAL ((uint16_t *)ADC_CAL_ADDRESS)
 
 #define DMA_BUFFER_SIZE ((uint32_t)30)
-
+#define UDP_BUFFER_SIZE_BYTES (1200)
 __IO uint32_t ADCConvVals[DMA_BUFFER_SIZE];
+uint32_t udp_buffer[300];
+
 int bufitem;
 uint32_t udp_counter = 0;
+uint16_t pos_counter = 0;
+int a;
 udp_send_obj_t *UDPS;
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     NVIC_DisableIRQ(DMA2_Stream4_IRQn);
 
-    UDPS->errorstate = mp_send_udp(UDPS->pcb, (u32_t*)ADCConvVals, &UDPS->destip, UDPS->port, 30*4);
-    printf("%d\n", UDPS->errorstate);
+    pos_counter=(30*udp_counter)%300;
+
+    if(pos_counter == 270){
+        for(a=0; a<30; a++){
+            udp_buffer[pos_counter+a] = ADCConvVals[a];
+        }
+        UDPS->errorstate = mp_send_udp(UDPS->pcb, (u32_t*)udp_buffer, &UDPS->destip, UDPS->port, 300*4);
+    }
+
+    else{
+        for(a=0; a<30; a++){
+            udp_buffer[pos_counter+a] = ADCConvVals[a];
+        }
+    }
+
 
     /*for(bufitem=0; bufitem<DMA_BUFFER_SIZE; bufitem++){
         printf("%lu\n",ADCConvVals[bufitem]);
@@ -187,8 +204,9 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     udp_counter++;
 
-    if(udp_counter==5){
+    if(udp_counter==10000){
         HAL_ADC_Stop_DMA(adch);
+        printf("\n");
         led_toggle(PYB_LED_GREEN);
     }
 
@@ -573,7 +591,6 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     
     if(mp_obj_is_true(args[1])){
         adc_init_triple(o);
-        printf("TRIPLEMODE");
     }
     else{
         adc_init_single(o);
@@ -701,7 +718,6 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_3(adc_read_timed_obj, adc_read_timed);
 STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
 
     // keep network alive?
-    //NVIC_SetPriority(ETH_IRQn, IRQ_PRI_DMA);
 
     mp_init_udp(UDPS);
 
@@ -715,7 +731,7 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
         Error_Handler();
     }
 
-    while(1){
+    while(udp_counter<30){
     }
 
     return mp_const_none;
@@ -750,6 +766,9 @@ STATIC mp_obj_t adc_read_interleaved(mp_obj_t self_in) {
     if (HAL_ADC_Start(&self->handle2) != HAL_OK) {
         Error_Handler();
     }
+
+    mp_hal_delay_ms(500);
+
     // Start triple interleaved mode with ADC1
     if (HAL_ADCEx_MultiModeStart_DMA(&self->handle, (uint32_t *)ADCConvVals, DMA_BUFFER_SIZE) != HAL_OK) {
         Error_Handler();

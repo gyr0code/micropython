@@ -144,6 +144,10 @@ MP_DECLARE_CONST_FUN_OBJ_0(pyb_irq_stats_obj);
 
 #define IRQ_PRI_ADC             NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 15, 1)
 
+#define IRQ_PRI_2               NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 2, 0)
+#define IRQ_PRI_3               NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 3, 0)
+
+
 // SDIO must be higher priority than DMA for SDIO DMA transfers to work.
 #define IRQ_PRI_SDIO            NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 4, 0)
 
