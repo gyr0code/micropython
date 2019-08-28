@@ -168,29 +168,32 @@
 
 #define DMA_BUFFER_SIZE ((uint32_t)30)
 
+__IO uint32_t ADCConvVals[DMA_BUFFER_SIZE];
+int bufitem;
 uint32_t udp_counter = 0;
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     NVIC_DisableIRQ(DMA2_Stream4_IRQn);
     
-    if(udp_counter==1000){
-        led_toggle(PYB_LED_RED);
-        }
-    
-    if (udp_counter==100000){
-        led_toggle(PYB_LED_GREEN);
-        printf("LULW");
-    }
-    
+
+    /*for(bufitem=0; bufitem<DMA_BUFFER_SIZE; bufitem++){
+        printf("%lu\n",ADCConvVals[bufitem]);
+    }*/
+
     udp_counter++;
-    
+
+    if(udp_counter==30){
+        HAL_ADC_Stop_DMA(adch);
+        led_toggle(PYB_LED_GREEN);
+    }
+
     NVIC_EnableIRQ(DMA2_Stream4_IRQn);
 
 }
 
 void Error_Handler(void){
-    printf("ERROR!");
+    printf("ERROR!\n");
 }
 
 typedef struct _pyb_obj_adc_t {
@@ -301,6 +304,7 @@ STATIC void adc_triple_init_periph(ADC_HandleTypeDef *adch, ADC_HandleTypeDef *a
     if(HAL_ADC_Init(adch2) != HAL_OK){
         Error_Handler();
     }
+
     adch->Instance                   = ADC1;
 
     adch->Init.Resolution            = ADC_RESOLUTION_12B;
@@ -317,6 +321,16 @@ STATIC void adc_triple_init_periph(ADC_HandleTypeDef *adch, ADC_HandleTypeDef *a
     if(HAL_ADC_Init(adch) != HAL_OK){
         Error_Handler();
     }
+
+    static DMA_HandleTypeDef DMAHandle;
+
+    dma_deinit(&dma_SPI_4_TX);
+    dma_deinit(&dma_SPI_5_TX);
+
+    dma_init(&DMAHandle, &dma_ADC_1, DMA_PERIPH_TO_MEMORY, adch);
+    
+    adch->DMA_Handle = &DMAHandle;
+
 
 }
 
@@ -516,6 +530,12 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     mp_obj_t pin_obj = args[0];
     uint32_t channel;
 
+    int i;
+
+    for (i=0;i<DMA_BUFFER_SIZE;i++){
+        ADCConvVals[i] = 0; 
+    }
+
     if (mp_obj_is_int(pin_obj)) {
         channel = adc_get_internal_channel(mp_obj_get_int(pin_obj));
     } else {
@@ -548,6 +568,7 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     
     if(mp_obj_is_true(args[1])){
         adc_init_triple(o);
+        printf("TRIPLEMODE");
     }
     else{
         adc_init_single(o);
@@ -676,19 +697,12 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
 
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
 
-    __IO uint32_t ADCConvVals[DMA_BUFFER_SIZE];
-    int i;
-
-    for (i=0;i<DMA_BUFFER_SIZE;i++){
-        ADCConvVals[i] = 0; 
-    }
-
     adc_config_channel(&self->handle, self->channel);
 
     printf("CONFIG\n");
 
-    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)ADCConvVals, 10)!= HAL_OK){
-        printf("DMA ERROR HERE!");
+    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)ADCConvVals, 30)!= HAL_OK){
+        Error_Handler();
     }
 
     while(1){
@@ -702,13 +716,6 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_dma_obj, adc_read_dma);
 STATIC mp_obj_t adc_read_interleaved(mp_obj_t self_in) {
 
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
-    
-    __IO uint32_t tripleADCConvVals[DMA_BUFFER_SIZE];
-    int i;
-
-    for (i=0;i<DMA_BUFFER_SIZE;i++){
-        tripleADCConvVals[i] = 0;
-    }
 
     // configure the ADC channel
     adc_config_channel(&self->handle, self->channel);
@@ -733,7 +740,7 @@ STATIC mp_obj_t adc_read_interleaved(mp_obj_t self_in) {
         Error_Handler();
     }
 
-    if (HAL_ADCEx_MultiModeStart_DMA(&self->handle, (uint32_t *)tripleADCConvVals, DMA_BUFFER_SIZE) != HAL_OK) {
+    if (HAL_ADCEx_MultiModeStart_DMA(&self->handle, (uint32_t *)ADCConvVals, DMA_BUFFER_SIZE) != HAL_OK) {
         Error_Handler();
     }
 
