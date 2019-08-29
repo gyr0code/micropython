@@ -180,6 +180,11 @@ uint8_t  breakstate = 0;
 int a;
 udp_send_obj_t *UDPS;
 
+void Error_Handler(void){
+    printf("ERROR!\n");
+}
+
+
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     NVIC_DisableIRQ(DMA2_Stream4_IRQn);
@@ -208,24 +213,19 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     udp_counter++;
     
-    if(udp_counter==100){
-        led_toggle(PYB_LED_GREEN);
+    if(udp_counter==10000){
         breakstate = 1;
+        if(HAL_ADC_Stop_DMA(adch) != HAL_OK){Error_Handler();}
         //HAL_ADCEx_MultiModeStop_DMA(adch);
+        led_toggle(PYB_LED_GREEN);
         return;
     
     }
 
 NVIC_EnableIRQ(DMA2_Stream4_IRQn);
 
-
 }
 
-void Error_Handler(void){
-
-    printf("ERROR!\n");
-
-}
 
 // Reset system ticks
 void DWT_config(void){
@@ -611,9 +611,11 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     
     if(mp_obj_is_true(args[1])){
         adc_init_triple(o);
+        printf("TRIPLECONF\n");
     }
     else{
         adc_init_single(o);
+        printf("SINGLECONF\n");
     }
     return MP_OBJ_FROM_PTR(o);
 }
@@ -747,15 +749,24 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
 
     printf("CONFIG\n");
 
-    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)ADCConvVals, 30)!= HAL_OK){
+    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)ADCConvVals, 90)!= HAL_OK){
         Error_Handler();
     }
+        
+    uint32_t sys_cyclesA = 0;
+    uint32_t sys_cyclesB = 0;
+
+    DWT_config();
+    sys_cyclesA = DWT->CYCCNT;
 
     while(1){
-        if(udp_counter==10000){
+/*        if(breakstate==1){
             break;
-        }
+        }*/
     }
+
+    sys_cyclesB = DWT->CYCCNT;
+    printf("%lu\n", sys_cyclesB-sys_cyclesA);
 
     return mp_const_none;
 

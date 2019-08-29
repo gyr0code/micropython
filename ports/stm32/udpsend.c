@@ -19,7 +19,7 @@ void mp_send_udp(struct udp_pcb *udppcb ,const u32_t *payload, ip_addr_t *dest_i
 
     struct pbuf *p;
 
-    p = pbuf_alloc(PBUF_TRANSPORT, payloadsize, PBUF_ROM);
+    p = pbuf_alloc(PBUF_TRANSPORT, payloadsize, PBUF_RAM);
 
     pbuf_take(p, (char*)payload , p->tot_len);
 
