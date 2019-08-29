@@ -177,6 +177,9 @@ int bufitem;
 uint32_t udp_counter = 0;
 uint16_t pos_counter = 0;
 uint8_t  breakstate = 0;
+uint32_t sys_cyclesA = 0;
+uint32_t sys_cyclesB = 0;
+
 int a;
 udp_send_obj_t *UDPS;
 
@@ -192,6 +195,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
     pos_counter=(90*udp_counter)%360;
 
     if(pos_counter == 270){
+        
         for(a=0; a<90; a++){
             udp_buffer[pos_counter+a] = ADCConvVals[a];
         }
@@ -213,12 +217,15 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     udp_counter++;
     
-    if(udp_counter==10000){
+    if(udp_counter==100000){
+        sys_cyclesB = DWT->CYCCNT;
+        printf("%lu\n", sys_cyclesB-sys_cyclesA);
         breakstate = 1;
         if(HAL_ADC_Stop_DMA(adch) != HAL_OK){Error_Handler();}
         //HAL_ADCEx_MultiModeStop_DMA(adch);
-        led_toggle(PYB_LED_GREEN);
-        return;
+        led_toggle(PYB_LED_GREEN);        
+
+
     
     }
 
@@ -749,25 +756,18 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
 
     printf("CONFIG\n");
 
-    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)ADCConvVals, 90)!= HAL_OK){
-        Error_Handler();
-    }
-        
-    uint32_t sys_cyclesA = 0;
-    uint32_t sys_cyclesB = 0;
-
     DWT_config();
     sys_cyclesA = DWT->CYCCNT;
 
+    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)ADCConvVals, 90) != HAL_OK){
+        Error_Handler();
+    }
+    
     while(1){
 /*        if(breakstate==1){
             break;
         }*/
     }
-
-    sys_cyclesB = DWT->CYCCNT;
-    printf("%lu\n", sys_cyclesB-sys_cyclesA);
-
     return mp_const_none;
 
 }
