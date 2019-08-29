@@ -167,14 +167,16 @@
 #define ADC_SCALE (ADC_SCALE_V / ((1 << ADC_CAL_BITS) - 1))
 #define VREFIN_CAL ((uint16_t *)ADC_CAL_ADDRESS)
 
-#define DMA_BUFFER_SIZE ((uint32_t)30)
-#define UDP_BUFFER_SIZE_BYTES (1200)
+#define DMA_BUFFER_SIZE ((uint32_t)90)
+#define UDP_BUFFER_SIZE_BYTES (1440)
+
 __IO uint32_t ADCConvVals[DMA_BUFFER_SIZE];
-uint32_t udp_buffer[300];
+uint32_t udp_buffer[360];
 
 int bufitem;
 uint32_t udp_counter = 0;
 uint16_t pos_counter = 0;
+uint8_t  breakstate = 0;
 int a;
 udp_send_obj_t *UDPS;
 
@@ -182,17 +184,19 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     NVIC_DisableIRQ(DMA2_Stream4_IRQn);
 
-    pos_counter=(30*udp_counter)%300;
+    pos_counter=(90*udp_counter)%360;
 
     if(pos_counter == 270){
-        for(a=0; a<30; a++){
+        for(a=0; a<90; a++){
             udp_buffer[pos_counter+a] = ADCConvVals[a];
         }
-        UDPS->errorstate = mp_send_udp(UDPS->pcb, (u32_t*)udp_buffer, &UDPS->destip, UDPS->port, 300*4);
+
+        mp_send_udp(UDPS->pcb, (u32_t*)udp_buffer, &UDPS->destip, UDPS->port, 1440);
+   
     }
 
     else{
-        for(a=0; a<30; a++){
+        for(a=0; a<90; a++){
             udp_buffer[pos_counter+a] = ADCConvVals[a];
         }
     }
@@ -203,19 +207,35 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
     }*/
 
     udp_counter++;
-
-    if(udp_counter==10000){
-        HAL_ADC_Stop_DMA(adch);
-        printf("\n");
+    
+    if(udp_counter==100){
         led_toggle(PYB_LED_GREEN);
+        breakstate = 1;
+        //HAL_ADCEx_MultiModeStop_DMA(adch);
+        return;
+    
     }
 
-    NVIC_EnableIRQ(DMA2_Stream4_IRQn);
+NVIC_EnableIRQ(DMA2_Stream4_IRQn);
+
 
 }
 
 void Error_Handler(void){
+
     printf("ERROR!\n");
+
+}
+
+// Reset system ticks
+void DWT_config(void){
+    
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    
+    DWT->CYCCNT = 0;
+    
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
 }
 
 typedef struct _pyb_obj_adc_t {
@@ -731,7 +751,10 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
         Error_Handler();
     }
 
-    while(udp_counter<30){
+    while(1){
+        if(udp_counter==10000){
+            break;
+        }
     }
 
     return mp_const_none;
@@ -766,13 +789,35 @@ STATIC mp_obj_t adc_read_interleaved(mp_obj_t self_in) {
     if (HAL_ADC_Start(&self->handle2) != HAL_OK) {
         Error_Handler();
     }
-
+    printf("TIMERCONFIG\n");
     mp_hal_delay_ms(500);
+
+    //uint32_t sys_cyclesA = 0;
+    //uint32_t sys_cyclesB = 0;
+
+    
+
+    //DWT_config();
+    //sys_cyclesA = DWT->CYCCNT;
 
     // Start triple interleaved mode with ADC1
     if (HAL_ADCEx_MultiModeStart_DMA(&self->handle, (uint32_t *)ADCConvVals, DMA_BUFFER_SIZE) != HAL_OK) {
         Error_Handler();
     }
+
+    while(1){
+
+        if(breakstate==1){
+            
+            break;
+
+        }
+    
+    }
+
+    //sys_cyclesB = DWT->CYCCNT;
+
+    //printf("%lu\n", sys_cyclesB-sys_cyclesA);
 
     return mp_const_none;
 }
