@@ -170,6 +170,8 @@
 #define DMA_BUFFER_SIZE ((uint32_t)90)
 #define UDP_BUFFER_SIZE_BYTES (1440)
 
+static void adc_dma_DeInit(ADC_HandleTypeDef *adch);
+static void Error_Handler(void);
 __IO uint32_t ADCConvVals[DMA_BUFFER_SIZE];
 uint32_t udp_buffer[360];
 
@@ -182,11 +184,6 @@ uint32_t sys_cyclesB = 0;
 
 int a;
 udp_send_obj_t *UDPS;
-
-void Error_Handler(void){
-    printf("ERROR!\n");
-}
-
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
@@ -217,16 +214,14 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     udp_counter++;
     
-    if(udp_counter==100000){
+    if(udp_counter==100){
         sys_cyclesB = DWT->CYCCNT;
         printf("%lu\n", sys_cyclesB-sys_cyclesA);
-        breakstate = 1;
-        if(HAL_ADC_Stop_DMA(adch) != HAL_OK){Error_Handler();}
         //HAL_ADCEx_MultiModeStop_DMA(adch);
-        led_toggle(PYB_LED_GREEN);        
-
-
-    
+        adc_dma_DeInit(adch);
+        led_toggle(PYB_LED_GREEN);
+        printf("END OF CONVERSION\n");
+        udp_counter = 0;
     }
 
 NVIC_EnableIRQ(DMA2_Stream4_IRQn);
@@ -234,14 +229,27 @@ NVIC_EnableIRQ(DMA2_Stream4_IRQn);
 }
 
 
+static void Error_Handler(void){
+    printf("ERROR!\n");
+}
+
+
 // Reset system ticks
 void DWT_config(void){
     
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-    
     DWT->CYCCNT = 0;
-    
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
+}
+
+
+static void adc_dma_DeInit(ADC_HandleTypeDef *adch){
+
+        if(HAL_ADC_Stop_DMA(adch) != HAL_OK){
+            Error_Handler();}
+        
+        dma_deinit(&dma_ADC_1);
 
 }
 
@@ -435,17 +443,6 @@ STATIC void adcx_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution) {
     HAL_ADCEx_Calibration_Start(adch, ADC_SINGLE_ENDED);
     #endif
 
-    // micropython DMA init code, priority 2
-    static DMA_HandleTypeDef DMAHandle;
-
-    dma_deinit(&dma_SPI_4_TX);
-    dma_deinit(&dma_SPI_5_TX);
-
-    dma_init(&DMAHandle, &dma_ADC_1, DMA_PERIPH_TO_MEMORY, adch);
-    
-    printf("DMA INIT\n");
-
-    adch->DMA_Handle = &DMAHandle;
 
 }
 
@@ -575,7 +572,7 @@ STATIC void adc_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t
 STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     // check number of arguments
     mp_arg_check_num(n_args, n_kw, 2, 2, false);
-
+    mp_init_udp(UDPS);
     // 1st argument is the pin name
     mp_obj_t pin_obj = args[0];
     uint32_t channel;
@@ -746,15 +743,21 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_3(adc_read_timed_obj, adc_read_timed);
 
 STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
 
-    // keep network alive?
-
-    mp_init_udp(UDPS);
-
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
+
+    // micropython DMA init code, priority 2
+    static DMA_HandleTypeDef DMAHandle;
+
+    dma_deinit(&dma_SPI_4_TX);
+    dma_deinit(&dma_SPI_5_TX);
+
+    dma_init(&DMAHandle, &dma_ADC_1, DMA_PERIPH_TO_MEMORY, &self->handle);
+    
+    self->handle.DMA_Handle = &DMAHandle;
 
     adc_config_channel(&self->handle, self->channel);
 
-    printf("CONFIG\n");
+    printf("CONFIG COMPLETE\n");
 
     DWT_config();
     sys_cyclesA = DWT->CYCCNT;
@@ -762,17 +765,14 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
     if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)ADCConvVals, 90) != HAL_OK){
         Error_Handler();
     }
-    
-    while(1){
-/*        if(breakstate==1){
-            break;
-        }*/
-    }
+
     return mp_const_none;
 
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_dma_obj, adc_read_dma);
 
+
+// CAN'T READOUT INTERLEAVED MODE IN POLLING //
 STATIC mp_obj_t adc_read_interleaved(mp_obj_t self_in) {
 
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
@@ -802,14 +802,6 @@ STATIC mp_obj_t adc_read_interleaved(mp_obj_t self_in) {
     }
     printf("TIMERCONFIG\n");
     mp_hal_delay_ms(500);
-
-    //uint32_t sys_cyclesA = 0;
-    //uint32_t sys_cyclesB = 0;
-
-    
-
-    //DWT_config();
-    //sys_cyclesA = DWT->CYCCNT;
 
     // Start triple interleaved mode with ADC1
     if (HAL_ADCEx_MultiModeStart_DMA(&self->handle, (uint32_t *)ADCConvVals, DMA_BUFFER_SIZE) != HAL_OK) {
