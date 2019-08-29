@@ -167,25 +167,38 @@
 #define ADC_SCALE (ADC_SCALE_V / ((1 << ADC_CAL_BITS) - 1))
 #define VREFIN_CAL ((uint16_t *)ADC_CAL_ADDRESS)
 
-#define DMA_BUFFER_SIZE ((uint32_t)90)
-#define UDP_BUFFER_SIZE_BYTES (1440)
+#define DMA_BUFFER_SIZE ((uint32_t)40)
+#define MAX_PAYLOAD_SIZE 1472
+#define NUMBER_PEAKS MAX_PAYLOAD_SIZE/8
+#define NUMBER_WORDS MAX_PAYLOAD_SIZE/4
+#define PP_THR 200
+#define PP_WINDOW_MAX 10
+#define PP_WINDOW_MIN 5
+#define PP_CLK_MHZ 216
 
-static void adc_dma_DeInit(ADC_HandleTypeDef *adch);
+//static void adc_dma_DeInit(ADC_HandleTypeDef *adch);
 static void Error_Handler(void);
-__IO uint32_t ADCConvVals[DMA_BUFFER_SIZE];
-uint32_t udp_buffer[360];
+static void SendDataPeak(void);
 
-int bufitem;
-uint32_t udp_counter = 0;
-uint16_t pos_counter = 0;
-uint8_t  breakstate = 0;
+__IO uint32_t aADCConvertedValues[DMA_BUFFER_SIZE];
+uint32_t udp_buffer[360];
+uint8_t in_peak = 0;
+uint16_t max_adc = 0;
+uint32_t cycl = 0;
+uint32_t peakNum = 0;
+uint32_t seconds = 0;
+uint32_t last_cycles = 0;
+uint32_t time_s = 0;
 uint32_t sys_cyclesA = 0;
 uint32_t sys_cyclesB = 0;
+u32_t payload[NUMBER_WORDS];
 
-int a;
+//int a;
 udp_send_obj_t *UDPS;
-
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
+    SendDataPeak();
+}
+/*void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     NVIC_DisableIRQ(DMA2_Stream4_IRQn);
 
@@ -194,7 +207,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
     if(pos_counter == 270){
         
         for(a=0; a<90; a++){
-            udp_buffer[pos_counter+a] = ADCConvVals[a];
+            udp_buffer[pos_counter+a] = aADCConvertedValues[a];
         }
 
         mp_send_udp(UDPS->pcb, (u32_t*)udp_buffer, &UDPS->destip, UDPS->port, 1440);
@@ -203,18 +216,14 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     else{
         for(a=0; a<90; a++){
-            udp_buffer[pos_counter+a] = ADCConvVals[a];
+            udp_buffer[pos_counter+a] = aADCConvertedValues[a];
         }
     }
-
-
-    /*for(bufitem=0; bufitem<DMA_BUFFER_SIZE; bufitem++){
-        printf("%lu\n",ADCConvVals[bufitem]);
-    }*/
 
     udp_counter++;
     
     if(udp_counter==100){
+
         sys_cyclesB = DWT->CYCCNT;
         printf("%lu\n", sys_cyclesB-sys_cyclesA);
         //HAL_ADCEx_MultiModeStop_DMA(adch);
@@ -222,17 +231,17 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
         led_toggle(PYB_LED_GREEN);
         printf("END OF CONVERSION\n");
         udp_counter = 0;
+
     }
 
 NVIC_EnableIRQ(DMA2_Stream4_IRQn);
 
-}
+}*/
 
 
 static void Error_Handler(void){
     printf("ERROR!\n");
 }
-
 
 // Reset system ticks
 void DWT_config(void){
@@ -243,7 +252,58 @@ void DWT_config(void){
 
 }
 
+void SendDataPeak(void){
+  if (peakNum < NUMBER_PEAKS-4) {
+    
+    uint32_t time_us = 0;
+    uint32_t val1 = 0;
+    uint32_t val2 = 0;
+  
+    for (int n = 0; n < DMA_BUFFER_SIZE; n++) {
+      val1 = (0xFFFF & aADCConvertedValues[n]);
+      val2 = (0xFFFF & (aADCConvertedValues[n] >> 16));
+      if (in_peak == 0) {
+        if (val1 > PP_THR || val2 > PP_THR) {
+          //sampleIdx = 0;
+          in_peak = 1;
+          time_s = seconds;
+          cycl = DWT->CYCCNT;
+        }
+      } 
+      else {
+        if (val1 > max_adc) {
+          max_adc = val1;
+        }
+        if (val2> max_adc) {
+          max_adc = val2;
+        }
+        //sampleIdx++;
+        if (val1 < PP_THR || val2 < PP_THR ) {
+          in_peak = 0;
+          //if (sampleIdx >= PP_WINDOW_MIN && sampleIdx <= PP_WINDOW_MAX) {
+            //found peak
+            if ((cycl - last_cycles) > 0) {
+              time_us = (cycl - last_cycles) / PP_CLK_MHZ;
+            } else {
+              time_us = (4294967295 + cycl - last_cycles) / PP_CLK_MHZ;
+            }
+            payload[peakNum * 2] = time_s;
+            payload[peakNum * 2 + 1] = (time_us << 12) | (max_adc);
+            peakNum++;
+            max_adc = 0;
+            //Pull stretcher pulse down again
+          //}
+        }
+      }
+    }
+    if (peakNum >= NUMBER_PEAKS - 4) {
+      //udp_send_data((u8_t *)payload, peakNum*8);
+      peakNum = 0;
+    }
+  }
+}
 
+/*
 static void adc_dma_DeInit(ADC_HandleTypeDef *adch){
 
         if(HAL_ADC_Stop_DMA(adch) != HAL_OK){
@@ -251,7 +311,7 @@ static void adc_dma_DeInit(ADC_HandleTypeDef *adch){
         
         dma_deinit(&dma_ADC_1);
 
-}
+}*/
 
 typedef struct _pyb_obj_adc_t {
     mp_obj_base_t base;
@@ -580,7 +640,7 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     int i;
 
     for (i=0;i<DMA_BUFFER_SIZE;i++){
-        ADCConvVals[i] = 0; 
+        aADCConvertedValues[i] = 0; 
     }
 
     if (mp_obj_is_int(pin_obj)) {
@@ -744,13 +804,10 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_3(adc_read_timed_obj, adc_read_timed);
 STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
 
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
-
-    // micropython DMA init code, priority 2
     static DMA_HandleTypeDef DMAHandle;
 
     dma_deinit(&dma_SPI_4_TX);
     dma_deinit(&dma_SPI_5_TX);
-
     dma_init(&DMAHandle, &dma_ADC_1, DMA_PERIPH_TO_MEMORY, &self->handle);
     
     self->handle.DMA_Handle = &DMAHandle;
@@ -762,13 +819,14 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
     DWT_config();
     sys_cyclesA = DWT->CYCCNT;
 
-    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)ADCConvVals, 90) != HAL_OK){
+    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)aADCConvertedValues, 90) != HAL_OK){
         Error_Handler();
     }
 
     return mp_const_none;
 
 }
+
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_dma_obj, adc_read_dma);
 
 
@@ -804,18 +862,8 @@ STATIC mp_obj_t adc_read_interleaved(mp_obj_t self_in) {
     mp_hal_delay_ms(500);
 
     // Start triple interleaved mode with ADC1
-    if (HAL_ADCEx_MultiModeStart_DMA(&self->handle, (uint32_t *)ADCConvVals, DMA_BUFFER_SIZE) != HAL_OK) {
+    if (HAL_ADCEx_MultiModeStart_DMA(&self->handle, (uint32_t *)aADCConvertedValues, DMA_BUFFER_SIZE) != HAL_OK) {
         Error_Handler();
-    }
-
-    while(1){
-
-        if(breakstate==1){
-            
-            break;
-
-        }
-    
     }
 
     //sys_cyclesB = DWT->CYCCNT;
