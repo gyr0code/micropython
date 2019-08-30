@@ -179,6 +179,7 @@
 //static void adc_dma_DeInit(ADC_HandleTypeDef *adch);
 static void Error_Handler(void);
 static void SendDataPeak(void);
+void DWT_config(void);
 
 __IO uint32_t aADCConvertedValues[DMA_BUFFER_SIZE];
 uint32_t udp_buffer[360];
@@ -198,6 +199,7 @@ udp_send_obj_t *UDPS;
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
     SendDataPeak();
 }
+
 /*void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
     NVIC_DisableIRQ(DMA2_Stream4_IRQn);
@@ -298,7 +300,8 @@ void SendDataPeak(void){
     }
     if (peakNum >= NUMBER_PEAKS - 4) {
       //udp_send_data((u8_t *)payload, peakNum*8);
-      peakNum = 0;
+        mp_send_udp(UDPS->pcb, (u32_t*)payload, &UDPS->destip, UDPS->port, peakNum*8);
+        peakNum = 0;
     }
   }
 }
@@ -806,6 +809,13 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
     static DMA_HandleTypeDef DMAHandle;
 
+    for(int n = 0; n < DMA_BUFFER_SIZE; n++){
+    aADCConvertedValues[n]=0;
+    }
+    for(int n = 0; n < NUMBER_PEAKS; n++){
+    payload[n]=0;
+    }
+
     dma_deinit(&dma_SPI_4_TX);
     dma_deinit(&dma_SPI_5_TX);
     dma_init(&DMAHandle, &dma_ADC_1, DMA_PERIPH_TO_MEMORY, &self->handle);
@@ -817,7 +827,6 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in) {
     printf("CONFIG COMPLETE\n");
 
     DWT_config();
-    sys_cyclesA = DWT->CYCCNT;
 
     if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)aADCConvertedValues, 90) != HAL_OK){
         Error_Handler();
