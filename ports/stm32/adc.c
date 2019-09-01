@@ -171,7 +171,7 @@
 #define MAX_PAYLOAD_SIZE 1472
 #define NUMBER_PEAKS MAX_PAYLOAD_SIZE/8
 #define NUMBER_WORDS MAX_PAYLOAD_SIZE/4
-#define PP_THR 200
+#define PP_THR 2300
 #define PP_WINDOW_MAX 10
 #define PP_WINDOW_MIN 5
 #define PP_CLK_MHZ 216
@@ -180,9 +180,9 @@
 static void Error_Handler(void);
 static void SendDataPeak(void);
 static void DWT_config(void);
+static void adc_dma_DeInit(ADC_HandleTypeDef *adch); 
 
 __IO uint32_t aADCConvertedValues[DMA_BUFFER_SIZE];
-uint32_t udp_buffer[360];
 uint8_t in_peak = 0;
 uint16_t max_adc = 0;
 uint32_t cycl = 0;
@@ -193,56 +193,17 @@ uint32_t time_s = 0;
 uint32_t totpeakNum = 0;
 uint32_t tot_samples = 0;
 u32_t payload[NUMBER_WORDS];
-
-//int a;
 udp_send_obj_t *UDPS;
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
-    
     SendDataPeak();
+    if (totpeakNum > tot_samples){
+    adc_dma_DeInit(adch);
+    printf("END");
+    printf("%lu\n", tot_samples);
 
+    }
 }
-
-/*void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
-
-    NVIC_DisableIRQ(DMA2_Stream4_IRQn);
-
-    pos_counter=(90*udp_counter)%360;
-
-    if(pos_counter == 270){
-        
-        for(a=0; a<90; a++){
-            udp_buffer[pos_counter+a] = aADCConvertedValues[a];
-        }
-
-        mp_send_udp(UDPS->pcb, (u32_t*)udp_buffer, &UDPS->destip, UDPS->port, 1440);
-   
-    }
-
-    else{
-        for(a=0; a<90; a++){
-            udp_buffer[pos_counter+a] = aADCConvertedValues[a];
-        }
-    }
-
-    udp_counter++;
-    
-    if(udp_counter==100){
-
-        sys_cyclesB = DWT->CYCCNT;
-        printf("%lu\n", sys_cyclesB-sys_cyclesA);
-        //HAL_ADCEx_MultiModeStop_DMA(adch);
-        adc_dma_DeInit(adch);
-        led_toggle(PYB_LED_GREEN);
-        printf("END OF CONVERSION\n");
-        udp_counter = 0;
-
-    }
-
-NVIC_EnableIRQ(DMA2_Stream4_IRQn);
-
-}*/
-
 
 static void Error_Handler(void){
     printf("ERROR!\n");
@@ -250,11 +211,9 @@ static void Error_Handler(void){
 
 // Reset system ticks
 static void DWT_config(void){
-    
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CYCCNT = 0;
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
-
 }
 
 void SendDataPeak(void){
@@ -303,26 +262,22 @@ void SendDataPeak(void){
     }
     if (peakNum >= NUMBER_PEAKS - 8) {
       //udp_send_data((u8_t *)payload, peakNum*8);
-        mp_send_udp(UDPS->pcb, (u32_t*)payload, &UDPS->destip, UDPS->port, peakNum*8);
-        peakNum = 0;
+        mp_send_udp(UDPS->pcb, (u8_t*)payload, &UDPS->destip, UDPS->port, peakNum*8);
         totpeakNum = totpeakNum + peakNum;
+        peakNum = 0;
+        
     }
   }
 }
-/*if(totpeakNum > tot_samples){
-    adc_dma_DeInit(adch);
-}
-*/
 
-/*
 static void adc_dma_DeInit(ADC_HandleTypeDef *adch){
 
         if(HAL_ADC_Stop_DMA(adch) != HAL_OK){
             Error_Handler();}
-        
+
         dma_deinit(&dma_ADC_1);
 
-}*/
+}
 
 typedef struct _pyb_obj_adc_t {
     mp_obj_base_t base;
@@ -454,17 +409,6 @@ STATIC void adc_dma_init_periph(ADC_HandleTypeDef *adch, ADC_HandleTypeDef *adch
     if(HAL_ADC_Init(adch) != HAL_OK){
         Error_Handler();
     }
-
-    static DMA_HandleTypeDef DMAHandle;
-
-    dma_deinit(&dma_SPI_4_TX);
-    dma_deinit(&dma_SPI_5_TX);
-
-    dma_init(&DMAHandle, &dma_ADC_1, DMA_PERIPH_TO_MEMORY, adch);
-    
-    adch->DMA_Handle = &DMAHandle;
-
-
 }
 
 STATIC void adcx_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution) {
@@ -683,6 +627,9 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
                 "channel %d not available on this board", channel));
         }
     }
+    // DEINIT CONFLICTING DMA HANDLERS
+    dma_deinit(&dma_SPI_4_TX);
+    dma_deinit(&dma_SPI_5_TX);
 
     pyb_obj_adc_t *o = m_new_obj(pyb_obj_adc_t);
     memset(o, 0, sizeof(*o));
@@ -823,8 +770,9 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_3(adc_read_timed_obj, adc_read_timed);
 STATIC mp_obj_t adc_read_dma(mp_obj_t self_in, mp_obj_t sample_num) {
 
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
-    totpeakNum = mp_obj_get_int(sample_num);
-    static DMA_HandleTypeDef DMAHandle;
+    tot_samples = mp_obj_get_int(sample_num);
+    printf("%lu\n", tot_samples);
+    totpeakNum = 0;
 
     for(int n = 0; n < DMA_BUFFER_SIZE; n++){
     aADCConvertedValues[n]=0;
@@ -833,19 +781,17 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in, mp_obj_t sample_num) {
     payload[n]=0;
     }
 
-    dma_deinit(&dma_SPI_4_TX);
-    dma_deinit(&dma_SPI_5_TX);
+    static DMA_HandleTypeDef DMAHandle;
+
     dma_init(&DMAHandle, &dma_ADC_1, DMA_PERIPH_TO_MEMORY, &self->handle);
-    
+    printf("INIT\n");
     self->handle.DMA_Handle = &DMAHandle;
-
+    printf("LINK\n");
     adc_config_channel(&self->handle, self->channel);
-
-    printf("CONFIG COMPLETE\n");
-
+    printf("CHANNEL\n");
     DWT_config();
-
-    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)aADCConvertedValues, 90) != HAL_OK){
+    printf("DWT\n");
+    if(HAL_ADC_Start_DMA(&self->handle, (uint32_t *)aADCConvertedValues, 40) != HAL_OK){
         Error_Handler();
     }
 
