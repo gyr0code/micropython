@@ -15,13 +15,13 @@ void mp_init_udp(udp_send_obj_t *UDP){
 }
 
 
-void mp_send_udp(struct udp_pcb *udppcb ,const u32_t *payload, ip_addr_t *dest_ip, u16_t port, u16_t payloadsize){
+void mp_send_udp(struct udp_pcb *udppcb ,const u8_t *payload, ip_addr_t *dest_ip, u16_t port, const int payloadsize){
 
     struct pbuf *p;
 
     p = pbuf_alloc(PBUF_TRANSPORT, payloadsize, PBUF_RAM);
 
-    pbuf_take(p, (char*)payload , p->tot_len);
+    pbuf_take(p, (char*)payload , payloadsize);
 
     udp_sendto(udppcb, p, dest_ip, port);
 
