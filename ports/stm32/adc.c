@@ -630,18 +630,6 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     o->pin_name = pin_obj;
     o->channel = channel;
 
-    /*
-    if(mp_obj_is_true(args[1])){
-        o->tri_mode = true;
-        adc_dma_init(o);
-        printf("TRIPLECONF\n");
-    }
-    else{
-        o->tri_mode = false;
-        adc_dma_init(o);
-        printf("SINGLECONF\n");
-    }*/
-
     if(strcmp(adc_mode, "TripleDMA")==0){
         o->tri_mode = true;
         adc_dma_init(o);
