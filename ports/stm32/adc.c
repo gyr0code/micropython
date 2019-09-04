@@ -192,6 +192,7 @@ uint32_t last_cycles = 0;
 uint32_t time_s = 0;
 uint32_t totpeakNum = 0;
 uint32_t tot_samples = 0;
+bool udpinit = false;
 u32_t payload[NUMBER_WORDS];
 udp_send_obj_t *UDPS;
 
@@ -263,9 +264,9 @@ void SendDataPeak(void){
 }
 
 static void adc_dma_DeInit(ADC_HandleTypeDef *adch){
-    if(HAL_ADCEx_MultiModeStop_DMA(adch) != HAL_OK){
+    /*if(HAL_ADCEx_MultiModeStop_DMA(adch) != HAL_OK){
         Error_Handler();
-    }
+    }*/
     
     if(HAL_ADC_Stop_DMA(adch) != HAL_OK){
         Error_Handler();
@@ -585,18 +586,16 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     // check number of arguments
     mp_arg_check_num(n_args, n_kw, 2, 2, false);
     // UDP Stuff...
-    mp_init_udp(UDPS);
+    if(udpinit){
+    }
+    else{
+        mp_init_udp(UDPS);
+        udpinit = true;
+    }
     // 1st argument is the pin name
     mp_obj_t pin_obj = args[0];
     const char *adc_mode = mp_obj_str_get_str(args[1]);
-    
     uint32_t channel;
-
-    int i;
-
-    for (i=0;i<DMA_BUFFER_SIZE;i++){
-        aADCConvertedValues[i] = 0; 
-    }
 
     if (mp_obj_is_int(pin_obj)) {
         channel = adc_get_internal_channel(mp_obj_get_int(pin_obj));
@@ -872,22 +871,9 @@ STATIC mp_obj_t adc_read_interleaved(mp_obj_t self_in, mp_obj_t sample_num) {
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(adc_read_interleaved_obj, adc_read_interleaved);
 
 STATIC mp_obj_t adc_deinit_setup(mp_obj_t self_in){
-    pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
-    
-    if(self->tri_mode){
-        // Stop the ADCs
-        HAL_ADC_Stop(&self->handle2);
-        HAL_ADC_Stop(&self->handle3);
-        // Deinit ADC peripherals
-        HAL_ADC_DeInit(&self->handle2);
-        HAL_ADC_DeInit(&self->handle3);
-        // Disable the ADC clocks
-        __HAL_RCC_ADC2_CLK_DISABLE();
-        __HAL_RCC_ADC3_CLK_DISABLE();
-    }
-
-    HAL_ADC_DeInit(&self->handle);
-    __HAL_RCC_ADC1_CLK_DISABLE();
+    // Hard Reset ADC peripherals for reinitialisation
+    __HAL_RCC_ADC_FORCE_RESET();
+    __HAL_RCC_ADC_RELEASE_RESET();
 
     return mp_const_none;
 }
