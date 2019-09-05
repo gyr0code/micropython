@@ -187,9 +187,8 @@ uint8_t in_peak = 0;
 uint16_t max_adc = 0;
 uint32_t cycl = 0;
 uint32_t peakNum = 0;
-uint32_t seconds = 0;
+uint16_t overflow = 0;
 uint32_t last_cycles = 0;
-uint32_t time_s = 0;
 uint32_t totpeakNum = 0;
 uint32_t tot_samples = 0;
 bool udpinit = false;
@@ -217,8 +216,6 @@ static void DWT_config(void){
 
 void SendDataPeak(void){
   if (peakNum < NUMBER_PEAKS-8) {
-    
-    uint32_t time_us = 0;
     uint32_t val1 = 0;
   
     for (int n = 0; n < DMA_BUFFER_SIZE; n++) {
@@ -227,7 +224,6 @@ void SendDataPeak(void){
         if (val1 > PP_THR){
           //sampleIdx = 0;
           in_peak = 1;
-          time_s = seconds;
           cycl = DWT->CYCCNT;
         }
       } 
@@ -240,13 +236,12 @@ void SendDataPeak(void){
           in_peak = 0;
           //if (sampleIdx >= PP_WINDOW_MIN && sampleIdx <= PP_WINDOW_MAX) {
             //found peak
-            if ((cycl - last_cycles) > 0) {
-              time_us = (cycl - last_cycles) / PP_CLK_MHZ;
-            } else {
-              time_us = (4294967296 + cycl - last_cycles) / PP_CLK_MHZ;
+            if(cycl < last_cycles){
+                overflow++;
             }
-            payload[peakNum * 2] = time_s;
-            payload[peakNum * 2 + 1] = (time_us << 12) | (max_adc);
+            last_cycles = cycl;
+            payload[peakNum * 2] = cycl;
+            payload[peakNum * 2 + 1] = (overflow << 12) | (max_adc);
             peakNum++;
             max_adc = 0;
             //Pull stretcher pulse down again
