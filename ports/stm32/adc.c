@@ -171,7 +171,7 @@
 #define MAX_PAYLOAD_SIZE 1472
 #define NUMBER_PEAKS MAX_PAYLOAD_SIZE/8
 #define NUMBER_WORDS MAX_PAYLOAD_SIZE/4
-#define PP_THR 500
+#define PP_THR 600
 #define PP_WINDOW_MAX 10
 #define PP_WINDOW_MIN 5
 #define PP_CLK_MHZ 216
@@ -259,14 +259,12 @@ void SendDataPeak(void){
 }
 
 static void adc_dma_DeInit(ADC_HandleTypeDef *adch){
-    /*if(HAL_ADCEx_MultiModeStop_DMA(adch) != HAL_OK){
+/*    if(HAL_ADCEx_MultiModeStop_DMA(adch) != HAL_OK){
         Error_Handler();
-    }*/
-    
+}*/
     if(HAL_ADC_Stop_DMA(adch) != HAL_OK){
         Error_Handler();
     }
-    
     dma_deinit(&dma_ADC_1);
 }
 
@@ -781,8 +779,6 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in, mp_obj_t sample_num) {
     self->handle.DMA_Handle = &DMAHandle;
 
     adc_config_channel(&self->handle, self->channel);
-
-    printf("HERE\n");
 
     DWT_config();
 
