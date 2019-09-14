@@ -170,7 +170,17 @@ typedef struct _pyb_obj_adc_t {
     mp_obj_t pin_name;
     int channel;
     ADC_HandleTypeDef handle;
+    bool DMA_mode;
 } pyb_obj_adc_t;
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
+    NVIC_DisableIRQ(DMA2_Stream0_IRQn);
+}
+
+static void adc_dma_DeInit(ADC_HandleTypeDef *adch){
+    HAL_ADC_Stop_DMA(adch);
+    dma_deinit(&dma_ADC_1);
+}
 
 // convert user-facing channel number into internal channel number
 static inline uint32_t adc_get_internal_channel(uint32_t channel) {
@@ -226,6 +236,26 @@ STATIC void adcx_clock_enable(void) {
     #error Unsupported processor
 #endif
 }
+
+STATIC void adcx_dma_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution){
+    adcx_clock_enable();
+    #if defined(STM32F7)
+    adch->Instance                   = ADCx;
+    adch->Init.Resolution            = resolution;
+    adch->Init.ContinuousConvMode    = ENABLE; 
+    adch->Init.DiscontinuousConvMode = DISABLE;
+    adch->Init.EOCSelection          = DISABLE;
+    adch->Init.ExternalTrigConv      = ADC_EXTERNALTRIGCONV_T1_CC1;
+    adch->Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
+    adch->Init.ClockPrescaler        = ADC_CLOCK_SYNC_PCLK_DIV2;
+    adch->Init.ScanConvMode          = DISABLE;
+    adch->Init.DataAlign             = ADC_DATAALIGN_RIGHT;
+    adch->Init.DMAContinuousRequests = ENABLE;
+    
+    HAL_ADC_Init(adch);
+    #endif
+}
+
 
 STATIC void adcx_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution) {
     adcx_clock_enable();
@@ -290,8 +320,14 @@ STATIC void adc_init_single(pyb_obj_adc_t *adc_obj) {
         const pin_obj_t *pin = pin_adc_table[adc_obj->channel];
         mp_hal_pin_config(pin, MP_HAL_PIN_MODE_ADC, MP_HAL_PIN_PULL_NONE, 0);
     }
+    
+    if(adc_obj->DMA_mode){
+        adcx_dma_init_periph(&adc_obj->handle, ADC_RESOLUTION_12B);
+    }
 
-    adcx_init_periph(&adc_obj->handle, ADC_RESOLUTION_12B);
+    else{
+        adcx_init_periph(&adc_obj->handle, ADC_RESOLUTION_12B);
+    }
 
 #if defined(STM32L4) && defined(ADC_DUALMODE_REGSIMULT_INJECSIMULT)
     ADC_MultiModeTypeDef multimode;
