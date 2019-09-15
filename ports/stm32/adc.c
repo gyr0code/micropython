@@ -165,6 +165,10 @@
 #define ADC_SCALE (ADC_SCALE_V / ((1 << ADC_CAL_BITS) - 1))
 #define VREFIN_CAL ((uint16_t *)ADC_CAL_ADDRESS)
 
+// mode macros
+#define ADC_DMA_MODE    ("DMA")
+#define ADC_TIMED_MODE  ("TIMED")
+
 typedef struct _pyb_obj_adc_t {
     mp_obj_base_t base;
     mp_obj_t pin_name;
@@ -425,11 +429,12 @@ STATIC void adc_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t
 /// This allows you to then read analog values on that pin.
 STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     // check number of arguments
-    mp_arg_check_num(n_args, n_kw, 1, 1, false);
+    mp_arg_check_num(n_args, n_kw, 2, 2, false);
 
     // 1st argument is the pin name
     mp_obj_t pin_obj = args[0];
 
+    const char *adc_mode = mp_obj_str_get_str(args[1]);
     uint32_t channel;
 
     if (mp_obj_is_int(pin_obj)) {
@@ -461,8 +466,17 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     o->base.type = &pyb_adc_type;
     o->pin_name = pin_obj;
     o->channel = channel;
-    adc_init_single(o);
 
+    if (strcmp(adc_mode, ADC_DMA_MODE) == 0){
+        o->DMA_mode = true;
+        adc_dma_init(o);
+    }
+
+    else if (strcmp(adc_mode, ADC_TIMED_MODE) == 0){
+        o->DMA_mode = false;
+        adc_init_single(o);
+    }
+    
     return MP_OBJ_FROM_PTR(o);
 }
 
@@ -475,6 +489,35 @@ STATIC mp_obj_t adc_read(mp_obj_t self_in) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_obj, adc_read);
 
+STATIC mp_obj_t adc_dma_start(mp_obj_t self_in, mp_obj_t buf_in){
+    
+    pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
+
+    dma_deinit(&dma_SPI_4_TX);
+    dma_deinit(&dma_SPI_5_TX);
+
+    static DMA_HandleTypeDef DMAHandle;
+
+    dma_init(&DMAHandle, &dma_ADC_1, DMA_PERIPH_TO_MEMORY, &self->handle);
+    self->handle.DMA_Handle = &DMAHandle;
+    adc_config_channel(&self->handle, self->channel);
+    
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_WRITE);
+
+
+    //NVIC_DisableIRQ(DMA2_Stream4_IRQn);
+    HAL_ADC_Start_DMA(&self->handle, (uint32_t *)bufinfo->buf , bufinfo->len);
+
+    return mp_const_none;
+}
+
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(adc_start_dma_obj, adc_start_dma);
+
+STATIC mp_obj_t adc_dma_read(mp_obj_t self_in){
+    NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+    return mp_const_none;
+}
 /// \method read_timed(buf, timer)
 ///
 /// Read analog values into `buf` at a rate set by the `timer` object.
