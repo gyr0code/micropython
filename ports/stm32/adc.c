@@ -516,8 +516,29 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_2(adc_start_dma_obj, adc_start_dma);
 
 STATIC mp_obj_t adc_dma_read(mp_obj_t self_in){
     NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+
     return mp_const_none;
 }
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_dma_read_obj, adc_dma_read);
+
+STATIC mp_obj_t adc_dma_stop(mp_obj_t self_in){
+    pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
+    adc_dma_DeInit(&self->handle)
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_dma_stop_obj, adc_dma_stop);
+
+STATIC mp_obj_t adc_reset(mp_obj_t self_in){
+    // Hard Reset ADC peripherals
+    __HAL_RCC_ADC_FORCE_RESET();
+    __HAL_RCC_ADC_RELEASE_RESET();
+    
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_reset_obj, adc_reset);
+
+
 /// \method read_timed(buf, timer)
 ///
 /// Read analog values into `buf` at a rate set by the `timer` object.
@@ -732,6 +753,10 @@ STATIC MP_DEFINE_CONST_STATICMETHOD_OBJ(adc_read_timed_multi_obj, MP_ROM_PTR(&ad
 
 STATIC const mp_rom_map_elem_t adc_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&adc_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_reset), MP_ROM_PTR(&adc_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_start_dma), MP_ROM_PTR(&adc_start_dma_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop_dma), MP_ROM_PTR(&adc_stop_dma_obj) },
+    { MP_ROM_QSTR(MP_QSTR_read_dma), MP_ROM_PTR(&adc_read_dma_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_timed), MP_ROM_PTR(&adc_read_timed_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_timed_multi), MP_ROM_PTR(&adc_read_timed_multi_obj) },
 };
