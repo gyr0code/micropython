@@ -469,7 +469,7 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
 
     if (strcmp(adc_mode, ADC_DMA_MODE) == 0){
         o->DMA_mode = true;
-        adc_dma_init(o);
+        adc_init_single(o);
     }
 
     else if (strcmp(adc_mode, ADC_TIMED_MODE) == 0){
@@ -507,12 +507,12 @@ STATIC mp_obj_t adc_dma_start(mp_obj_t self_in, mp_obj_t buf_in){
 
 
     //NVIC_DisableIRQ(DMA2_Stream4_IRQn);
-    HAL_ADC_Start_DMA(&self->handle, (uint32_t *)bufinfo->buf , bufinfo->len);
+    HAL_ADC_Start_DMA(&self->handle, (uint32_t *)bufinfo.buf , bufinfo.len);
 
     return mp_const_none;
 }
 
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(adc_start_dma_obj, adc_start_dma);
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(adc_dma_start_obj, adc_dma_start);
 
 STATIC mp_obj_t adc_dma_read(mp_obj_t self_in){
     NVIC_EnableIRQ(DMA2_Stream0_IRQn);
@@ -523,7 +523,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_dma_read_obj, adc_dma_read);
 
 STATIC mp_obj_t adc_dma_stop(mp_obj_t self_in){
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
-    adc_dma_DeInit(&self->handle)
+    adc_dma_DeInit(&self->handle);
 
     return mp_const_none;
 }
@@ -754,9 +754,9 @@ STATIC MP_DEFINE_CONST_STATICMETHOD_OBJ(adc_read_timed_multi_obj, MP_ROM_PTR(&ad
 STATIC const mp_rom_map_elem_t adc_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&adc_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_reset), MP_ROM_PTR(&adc_reset_obj) },
-    { MP_ROM_QSTR(MP_QSTR_start_dma), MP_ROM_PTR(&adc_start_dma_obj) },
-    { MP_ROM_QSTR(MP_QSTR_stop_dma), MP_ROM_PTR(&adc_stop_dma_obj) },
-    { MP_ROM_QSTR(MP_QSTR_read_dma), MP_ROM_PTR(&adc_read_dma_obj) },
+    { MP_ROM_QSTR(MP_QSTR_dma_start), MP_ROM_PTR(&adc_dma_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_dma_stop), MP_ROM_PTR(&adc_dma_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_dma_read), MP_ROM_PTR(&adc_dma_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_timed), MP_ROM_PTR(&adc_read_timed_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_timed_multi), MP_ROM_PTR(&adc_read_timed_multi_obj) },
 };
