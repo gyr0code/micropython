@@ -336,6 +336,7 @@ STATIC void adc_init_single(pyb_obj_adc_t *adc_obj) {
         mp_hal_pin_config(pin, MP_HAL_PIN_MODE_ADC, MP_HAL_PIN_PULL_NONE, 0);
     }
     
+    // Conditional adc configuration for DMA and TIMED modes.
     if(adc_obj->DMA_mode){
         adcx_dma_init_periph(&adc_obj->handle, ADC_RESOLUTION_12B);
     }
@@ -483,7 +484,6 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
         printf("DMAMODE\n");
         adc_init_single(o);
     }
-
     else if (strcmp(adc_mode, ADC_TIMED_MODE) == 0){
         o->DMA_mode = false;
         adc_init_single(o);
@@ -502,55 +502,75 @@ STATIC mp_obj_t adc_read(mp_obj_t self_in) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_obj, adc_read);
 
-STATIC mp_obj_t adc_dma_start(mp_obj_t self_in, mp_obj_t buf_in){
+/// \method start_dma(buf)
+/// Start the ADC with the DMA. Configures the DMA to store converted 
+/// adc values in buf. The supplied buffer, buf, must be a 32 bit 
+// array.array type of unsigned int, i.e array.array("I",[0]*len)
+/// to ensure compatibility with the HAL drivers for the DMA.
+// Output will be array of ADC values in range 0 to 4096.
+STATIC mp_obj_t adc_start_dma(mp_obj_t self_in, mp_obj_t buf_in){
     
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
+
+    if(!self->DMA_mode){
+        mp_raise_msg(&mp_type_OSError, "ADC is set up for TIMED mode.");
+    }
+
+    // Deinit clashing (unused?) dma interrupts on Stream 4
     dma_deinit(&dma_SPI_4_TX);
     dma_deinit(&dma_SPI_5_TX);
 
+    // Config the DMA handle for ADC-DMA
     static DMA_HandleTypeDef DMAHandle;
 
     dma_init(&DMAHandle, &dma_ADC_1, DMA_PERIPH_TO_MEMORY, &self->handle);
     self->handle.DMA_Handle = &DMAHandle;
     adc_config_channel(&self->handle, self->channel);
-    
+
+    // Init bufinfo struct to supply to DMA
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_WRITE);
+    //printf("%d",bufinfo.typecode);
 
-    for(int i=0; i<32; i++){
-        ((uint32_t*)bufinfo.buf)[i] = i;
+    if(bufinfo.typecode!=73){
+        mp_raise_TypeError("DMA requires unsigned 32bit buffer, use array.array with 'I' typecode.");
     }
-
     printf("SUCCESS!\n");
-    //NVIC_DisableIRQ(DMA2_Stream4_IRQn);
-
-    for(int a=0; a<32; a++){
-        printf("%lu \n",((uint32_t*)bufinfo.buf)[a]);
-    }
-    printf("BUFSIZE: %d \n", bufinfo.len);
-    
     HAL_ADC_Start_DMA(&self->handle, (uint32_t*)bufinfo.buf, bufinfo.len/4);
-    printf("PASSEDINIT\n");
+
     return mp_const_none;
 }
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(adc_start_dma_obj, adc_start_dma);
 
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(adc_dma_start_obj, adc_dma_start);
-
-STATIC mp_obj_t adc_dma_read(mp_obj_t self_in){
+/// \method read_dma()
+// Re-enables the DMA conversion complete interrupts which allow the 
+// buffer supplied to start_dma to be filled with ADC values sampled
+// at the maximum possible rate. This only results in a single
+// callback being executed, i.e the buffer is filled once.
+STATIC mp_obj_t adc_read_dma(mp_obj_t self_in){
     NVIC_EnableIRQ(DMA2_Stream4_IRQn);
 
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_dma_read_obj, adc_dma_read);
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_dma_obj, adc_read_dma);
 
-STATIC mp_obj_t adc_dma_stop(mp_obj_t self_in){
+/// \method stop_dma()
+// Stop the ADC working with the DMA and deinit the DMA itself, allows
+// subsequent calls of read_dma will fail. 
+STATIC mp_obj_t adc_stop_dma(mp_obj_t self_in){
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
+    if(!self->DMA_mode){
+        mp_raise_msg(&mp_type_OSError, "ADC is set up for TIMED mode.");
+    }
     adc_dma_DeInit(&self->handle);
 
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_dma_stop_obj, adc_dma_stop);
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_stop_dma_obj, adc_stop_dma);
 
+/// \method stop_dma()
+// Clear the ADC configuration to allow for a change in ADC mode,
+// seems to be unecessary.
 STATIC mp_obj_t adc_reset(mp_obj_t self_in){
     // Hard Reset ADC peripherals
     __HAL_RCC_ADC_FORCE_RESET();
@@ -597,6 +617,10 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_reset_obj, adc_reset);
 /// This function does not allocate any memory.
 STATIC mp_obj_t adc_read_timed(mp_obj_t self_in, mp_obj_t buf_in, mp_obj_t freq_in) {
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
+
+    if(self->DMA_mode){
+        mp_raise_msg(&mp_type_OSError, "ADC is set up for DMA mode.");
+    }
 
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_WRITE);
@@ -776,9 +800,9 @@ STATIC MP_DEFINE_CONST_STATICMETHOD_OBJ(adc_read_timed_multi_obj, MP_ROM_PTR(&ad
 STATIC const mp_rom_map_elem_t adc_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&adc_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_reset), MP_ROM_PTR(&adc_reset_obj) },
-    { MP_ROM_QSTR(MP_QSTR_dma_start), MP_ROM_PTR(&adc_dma_start_obj) },
-    { MP_ROM_QSTR(MP_QSTR_dma_stop), MP_ROM_PTR(&adc_dma_stop_obj) },
-    { MP_ROM_QSTR(MP_QSTR_dma_read), MP_ROM_PTR(&adc_dma_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_start_dma), MP_ROM_PTR(&adc_start_dma_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop_dma), MP_ROM_PTR(&adc_stop_dma_obj) },
+    { MP_ROM_QSTR(MP_QSTR_read_dma), MP_ROM_PTR(&adc_read_dma_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_timed), MP_ROM_PTR(&adc_read_timed_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_timed_multi), MP_ROM_PTR(&adc_read_timed_multi_obj) },
 };
