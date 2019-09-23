@@ -177,8 +177,14 @@ typedef struct _pyb_obj_adc_t {
     bool DMA_mode;
 } pyb_obj_adc_t;
 
+uint32_t DMA_BUFFO[32];
+
+void Error_Handle(void){
+    printf("ERROR_0\n");
+}
+
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
-    NVIC_DisableIRQ(DMA2_Stream0_IRQn);
+    HAL_NVIC_DisableIRQ(DMA2_Stream0_IRQn);
 }
 
 static void adc_dma_DeInit(ADC_HandleTypeDef *adch){
@@ -256,8 +262,11 @@ STATIC void adcx_dma_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution){
     adch->Init.DataAlign             = ADC_DATAALIGN_RIGHT;
     adch->Init.DMAContinuousRequests = ENABLE;
     
-    HAL_ADC_Init(adch);
+    if(HAL_ADC_Init(adch)!=HAL_OK){
+        Error_Handle();
+    }
     #endif
+    printf("ADCDMASTART\n");
 }
 
 
@@ -469,12 +478,14 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
 
     if (strcmp(adc_mode, ADC_DMA_MODE) == 0){
         o->DMA_mode = true;
+        printf("DMAMODE\n");
         adc_init_single(o);
     }
 
     else if (strcmp(adc_mode, ADC_TIMED_MODE) == 0){
         o->DMA_mode = false;
         adc_init_single(o);
+        printf("TIMEDMODE\n");
     }
     
     return MP_OBJ_FROM_PTR(o);
@@ -492,7 +503,6 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_obj, adc_read);
 STATIC mp_obj_t adc_dma_start(mp_obj_t self_in, mp_obj_t buf_in){
     
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
-
     dma_deinit(&dma_SPI_4_TX);
     dma_deinit(&dma_SPI_5_TX);
 
@@ -505,10 +515,20 @@ STATIC mp_obj_t adc_dma_start(mp_obj_t self_in, mp_obj_t buf_in){
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_WRITE);
 
+    for(int i=0; i<32; i++){
+        ((uint32_t*)bufinfo.buf)[i] = i;
+    }
 
+    printf("SUCCESS!\n");
     //NVIC_DisableIRQ(DMA2_Stream4_IRQn);
-    HAL_ADC_Start_DMA(&self->handle, (uint32_t *)bufinfo.buf , bufinfo.len);
 
+    for(int a=0; a<32; a++){
+        printf("%lu \n",((uint32_t*)bufinfo.buf)[a]);
+    }
+    printf("BUFSIZE: %d \n", bufinfo.len);
+    
+    HAL_ADC_Start_DMA(&self->handle, (uint32_t*)bufinfo.buf, bufinfo.len/4);
+    printf("PASSEDINIT\n");
     return mp_const_none;
 }
 
