@@ -33,7 +33,7 @@
 #include "adc.h"
 #include "pin.h"
 #include "timer.h"
-
+#include "dma.h"
 #if MICROPY_HW_ENABLE_ADC
 
 /// \moduleref pyb
@@ -165,12 +165,34 @@
 #define ADC_SCALE (ADC_SCALE_V / ((1 << ADC_CAL_BITS) - 1))
 #define VREFIN_CAL ((uint16_t *)ADC_CAL_ADDRESS)
 
+// adc mode macros
+#define ADC_DMA_MODE    ("DMA")
+#define ADC_TIMED_MODE  ("TIMED")
+
 typedef struct _pyb_obj_adc_t {
     mp_obj_base_t base;
     mp_obj_t pin_name;
     int channel;
     ADC_HandleTypeDef handle;
+    bool DMA_mode;
 } pyb_obj_adc_t;
+
+uint32_t DMA_BUFFO[32];
+
+void Error_Handle(void){
+    printf("ERROR_0\n");
+}
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
+    /* Disable further callbacks so only dma buf filled once */
+    NVIC_DisableIRQ(DMA2_Stream4_IRQn);
+}
+
+static void adc_dma_DeInit(ADC_HandleTypeDef *adch){
+    /// Fully deinit both ADC and DMA2_Stream4
+    HAL_ADC_Stop_DMA(adch);
+    dma_deinit(&dma_ADC_1);
+}
 
 // convert user-facing channel number into internal channel number
 static inline uint32_t adc_get_internal_channel(uint32_t channel) {
@@ -226,6 +248,29 @@ STATIC void adcx_clock_enable(void) {
     #error Unsupported processor
 #endif
 }
+
+STATIC void adcx_dma_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution){
+    adcx_clock_enable();
+    #if defined(STM32F7) || defined(STM32F4)
+    adch->Instance                   = ADCx;
+    adch->Init.Resolution            = resolution;
+    adch->Init.ContinuousConvMode    = ENABLE; 
+    adch->Init.DiscontinuousConvMode = DISABLE;
+    adch->Init.EOCSelection          = DISABLE;
+    adch->Init.ExternalTrigConv      = ADC_EXTERNALTRIGCONV_T1_CC1;
+    adch->Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
+    adch->Init.ClockPrescaler        = ADC_CLOCK_SYNC_PCLK_DIV2;
+    adch->Init.ScanConvMode          = DISABLE;
+    adch->Init.DataAlign             = ADC_DATAALIGN_RIGHT;
+    adch->Init.DMAContinuousRequests = ENABLE;
+    #endif
+    
+    if(HAL_ADC_Init(adch)!=HAL_OK){
+        Error_Handle();
+    }
+    printf("ADCDMASTART\n");
+}
+
 
 STATIC void adcx_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution) {
     adcx_clock_enable();
@@ -290,8 +335,15 @@ STATIC void adc_init_single(pyb_obj_adc_t *adc_obj) {
         const pin_obj_t *pin = pin_adc_table[adc_obj->channel];
         mp_hal_pin_config(pin, MP_HAL_PIN_MODE_ADC, MP_HAL_PIN_PULL_NONE, 0);
     }
+    
+    // Conditional adc configuration for DMA and TIMED modes.
+    if(adc_obj->DMA_mode){
+        adcx_dma_init_periph(&adc_obj->handle, ADC_RESOLUTION_12B);
+    }
 
-    adcx_init_periph(&adc_obj->handle, ADC_RESOLUTION_12B);
+    else{
+        adcx_init_periph(&adc_obj->handle, ADC_RESOLUTION_12B);
+    }
 
 #if defined(STM32L4) && defined(ADC_DUALMODE_REGSIMULT_INJECSIMULT)
     ADC_MultiModeTypeDef multimode;
@@ -389,11 +441,12 @@ STATIC void adc_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t
 /// This allows you to then read analog values on that pin.
 STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     // check number of arguments
-    mp_arg_check_num(n_args, n_kw, 1, 1, false);
+    mp_arg_check_num(n_args, n_kw, 2, 2, false);
 
     // 1st argument is the pin name
     mp_obj_t pin_obj = args[0];
 
+    const char *adc_mode = mp_obj_str_get_str(args[1]);
     uint32_t channel;
 
     if (mp_obj_is_int(pin_obj)) {
@@ -425,8 +478,18 @@ STATIC mp_obj_t adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     o->base.type = &pyb_adc_type;
     o->pin_name = pin_obj;
     o->channel = channel;
-    adc_init_single(o);
 
+    if (strcmp(adc_mode, ADC_DMA_MODE) == 0){
+        o->DMA_mode = true;
+        printf("DMAMODE\n");
+        adc_init_single(o);
+    }
+    else if (strcmp(adc_mode, ADC_TIMED_MODE) == 0){
+        o->DMA_mode = false;
+        adc_init_single(o);
+        printf("TIMEDMODE\n");
+    }
+    
     return MP_OBJ_FROM_PTR(o);
 }
 
@@ -438,6 +501,85 @@ STATIC mp_obj_t adc_read(mp_obj_t self_in) {
     return mp_obj_new_int(adc_config_and_read_channel(&self->handle, self->channel));
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_obj, adc_read);
+
+/// \method start_dma(buf)
+/// Start the ADC with the DMA. Configures the DMA to store converted 
+/// adc values in buf. The supplied buffer, buf, must be a 32 bit 
+// array.array type of unsigned int, i.e array.array("I",[0]*len)
+/// to ensure compatibility with the HAL drivers for the DMA.
+// Output will be array of ADC values in range 0 to 4096.
+STATIC mp_obj_t adc_start_dma(mp_obj_t self_in, mp_obj_t buf_in){
+    
+    pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
+
+    if(!self->DMA_mode){
+        mp_raise_msg(&mp_type_OSError, "ADC is set up for TIMED mode.");
+    }
+
+    // Deinit clashing (unused?) dma interrupts on Stream 4
+    dma_deinit(&dma_SPI_4_TX);
+    dma_deinit(&dma_SPI_5_TX);
+
+    // Config the DMA handle for ADC-DMA
+    static DMA_HandleTypeDef DMAHandle;
+
+    dma_init(&DMAHandle, &dma_ADC_1, DMA_PERIPH_TO_MEMORY, &self->handle);
+    self->handle.DMA_Handle = &DMAHandle;
+    adc_config_channel(&self->handle, self->channel);
+
+    // Init bufinfo struct to supply to DMA
+    mp_buffer_info_t bufinfo;
+    mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_WRITE);
+    //printf("%d",bufinfo.typecode);
+
+    if(bufinfo.typecode!=73){
+        mp_raise_TypeError("DMA requires unsigned 32bit buffer, use array.array with 'I' typecode.");
+    }
+    printf("SUCCESS!\n");
+    HAL_ADC_Start_DMA(&self->handle, (uint32_t*)bufinfo.buf, bufinfo.len/4);
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(adc_start_dma_obj, adc_start_dma);
+
+/// \method read_dma()
+// Re-enables the DMA conversion complete interrupts which allow the 
+// buffer supplied to start_dma to be filled with ADC values sampled
+// at the maximum possible rate. This only results in a single
+// callback being executed, i.e the buffer is filled once.
+STATIC mp_obj_t adc_read_dma(mp_obj_t self_in){
+    NVIC_EnableIRQ(DMA2_Stream4_IRQn);
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_dma_obj, adc_read_dma);
+
+/// \method stop_dma()
+// Stop the ADC working with the DMA and deinit the DMA itself, allows
+// subsequent calls of read_dma will fail. 
+STATIC mp_obj_t adc_stop_dma(mp_obj_t self_in){
+    pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
+    if(!self->DMA_mode){
+        mp_raise_msg(&mp_type_OSError, "ADC is set up for TIMED mode.");
+    }
+    adc_dma_DeInit(&self->handle);
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_stop_dma_obj, adc_stop_dma);
+
+/// \method stop_dma()
+// Clear the ADC configuration to allow for a change in ADC mode,
+// seems to be unecessary.
+STATIC mp_obj_t adc_reset(mp_obj_t self_in){
+    // Hard Reset ADC peripherals
+    __HAL_RCC_ADC_FORCE_RESET();
+    __HAL_RCC_ADC_RELEASE_RESET();
+    
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_reset_obj, adc_reset);
+
 
 /// \method read_timed(buf, timer)
 ///
@@ -475,6 +617,10 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_obj, adc_read);
 /// This function does not allocate any memory.
 STATIC mp_obj_t adc_read_timed(mp_obj_t self_in, mp_obj_t buf_in, mp_obj_t freq_in) {
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
+
+    if(self->DMA_mode){
+        mp_raise_msg(&mp_type_OSError, "ADC is set up for DMA mode.");
+    }
 
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_WRITE);
@@ -653,6 +799,10 @@ STATIC MP_DEFINE_CONST_STATICMETHOD_OBJ(adc_read_timed_multi_obj, MP_ROM_PTR(&ad
 
 STATIC const mp_rom_map_elem_t adc_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&adc_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_reset), MP_ROM_PTR(&adc_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_start_dma), MP_ROM_PTR(&adc_start_dma_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop_dma), MP_ROM_PTR(&adc_stop_dma_obj) },
+    { MP_ROM_QSTR(MP_QSTR_read_dma), MP_ROM_PTR(&adc_read_dma_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_timed), MP_ROM_PTR(&adc_read_timed_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_timed_multi), MP_ROM_PTR(&adc_read_timed_multi_obj) },
 };

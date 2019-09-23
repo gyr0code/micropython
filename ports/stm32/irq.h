@@ -133,6 +133,7 @@ MP_DECLARE_CONST_FUN_OBJ_0(pyb_irq_stats_obj);
 #define IRQ_PRI_EXTINT          2
 #define IRQ_PRI_PENDSV          3
 #define IRQ_PRI_RTC_WKUP        3
+#define IRQ_PRI_ADC             4
 
 #else
 
@@ -171,6 +172,7 @@ MP_DECLARE_CONST_FUN_OBJ_0(pyb_irq_stats_obj);
 // before exception is raised.
 #define IRQ_PRI_PENDSV          NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 15, 0)
 #define IRQ_PRI_RTC_WKUP        NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 15, 0)
+#define IRQ_PRI_ADC             NVIC_EncodePriority(NVIC_PRIORITYGROUP_4, 15, 1)
 
 #endif
 

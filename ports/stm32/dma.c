@@ -115,6 +115,18 @@ static const DMA_InitTypeDef dma_init_struct_spi_i2c = {
     #endif
 };
 
+// Default parameters to dma_init() for ADC1 
+static const DMA_InitTypeDef dma_init_struct_adc = {
+    .Channel             = DMA_CHANNEL_0,
+    .Direction           = DMA_PERIPH_TO_MEMORY,
+    .PeriphInc           = DMA_PINC_DISABLE,
+    .MemInc              = DMA_MINC_ENABLE,
+    .PeriphDataAlignment = DMA_PDATAALIGN_WORD,
+    .MemDataAlignment    = DMA_MDATAALIGN_WORD,
+    .Mode                = DMA_CIRCULAR,
+    .Priority            = DMA_PRIORITY_HIGH,
+};
+
 #if ENABLE_SDIO && !defined(STM32H7)
 // Parameters to dma_init() for SDIO tx and rx.
 static const DMA_InitTypeDef dma_init_struct_sdio = {
@@ -285,6 +297,7 @@ const dma_descr_t dma_SDIO_0 = { DMA2_Stream3, DMA_CHANNEL_4, dma_id_11,  &dma_i
 const dma_descr_t dma_SPI_4_RX = { DMA2_Stream3, DMA_CHANNEL_5, dma_id_11,  &dma_init_struct_spi_i2c };
 const dma_descr_t dma_SPI_5_TX = { DMA2_Stream4, DMA_CHANNEL_2, dma_id_12,  &dma_init_struct_spi_i2c };
 const dma_descr_t dma_SPI_4_TX = { DMA2_Stream4, DMA_CHANNEL_5, dma_id_12,  &dma_init_struct_spi_i2c };
+const dma_descr_t dma_ADC_1 = { DMA2_Stream4, DMA_CHANNEL_0, dma_id_12,  &dma_init_struct_adc };
 const dma_descr_t dma_SPI_6_TX = { DMA2_Stream5, DMA_CHANNEL_1, dma_id_13,  &dma_init_struct_spi_i2c };
 const dma_descr_t dma_SPI_1_TX = { DMA2_Stream5, DMA_CHANNEL_3, dma_id_13,  &dma_init_struct_spi_i2c };
 //#if defined(STM32F7) && defined(SDMMC2) && ENABLE_SDIO
@@ -742,7 +755,13 @@ void dma_init(DMA_HandleTypeDef *dma, const dma_descr_t *dma_descr, uint32_t dir
             // (dma->State is set to HAL_DMA_STATE_RESET by memset above)
             HAL_DMA_DeInit(dma);
             HAL_DMA_Init(dma);
-            NVIC_SetPriority(IRQn_NONNEG(dma_irqn[dma_id]), IRQ_PRI_DMA);
+            if(dma_descr==&dma_ADC_1){
+                NVIC_SetPriority(IRQn_NONNEG(dma_irqn[dma_id]), IRQ_PRI_ADC);
+                printf("PRISET\n");
+                }
+            else{
+                NVIC_SetPriority(IRQn_NONNEG(dma_irqn[dma_id]), IRQ_PRI_DMA);
+                }
             #if defined(STM32F0)
             if (dma->Instance < DMA2_Channel1) {
                 __HAL_DMA1_REMAP(dma_descr->sub_instance);
