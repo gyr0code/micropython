@@ -165,7 +165,7 @@
 #define ADC_SCALE (ADC_SCALE_V / ((1 << ADC_CAL_BITS) - 1))
 #define VREFIN_CAL ((uint16_t *)ADC_CAL_ADDRESS)
 
-// mode macros
+// adc mode macros
 #define ADC_DMA_MODE    ("DMA")
 #define ADC_TIMED_MODE  ("TIMED")
 
@@ -184,10 +184,12 @@ void Error_Handle(void){
 }
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
-    HAL_NVIC_DisableIRQ(DMA2_Stream0_IRQn);
+    /* Disable further callbacks so only dma buf filled once */
+    NVIC_DisableIRQ(DMA2_Stream4_IRQn);
 }
 
 static void adc_dma_DeInit(ADC_HandleTypeDef *adch){
+    /// Fully deinit both ADC and DMA2_Stream4
     HAL_ADC_Stop_DMA(adch);
     dma_deinit(&dma_ADC_1);
 }
@@ -249,7 +251,7 @@ STATIC void adcx_clock_enable(void) {
 
 STATIC void adcx_dma_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution){
     adcx_clock_enable();
-    #if defined(STM32F7)
+    #if defined(STM32F7) || defined(STM32F4)
     adch->Instance                   = ADCx;
     adch->Init.Resolution            = resolution;
     adch->Init.ContinuousConvMode    = ENABLE; 
@@ -261,11 +263,11 @@ STATIC void adcx_dma_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution){
     adch->Init.ScanConvMode          = DISABLE;
     adch->Init.DataAlign             = ADC_DATAALIGN_RIGHT;
     adch->Init.DMAContinuousRequests = ENABLE;
+    #endif
     
     if(HAL_ADC_Init(adch)!=HAL_OK){
         Error_Handle();
     }
-    #endif
     printf("ADCDMASTART\n");
 }
 
@@ -535,7 +537,7 @@ STATIC mp_obj_t adc_dma_start(mp_obj_t self_in, mp_obj_t buf_in){
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(adc_dma_start_obj, adc_dma_start);
 
 STATIC mp_obj_t adc_dma_read(mp_obj_t self_in){
-    NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+    NVIC_EnableIRQ(DMA2_Stream4_IRQn);
 
     return mp_const_none;
 }
