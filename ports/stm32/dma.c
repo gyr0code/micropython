@@ -755,9 +755,9 @@ void dma_init(DMA_HandleTypeDef *dma, const dma_descr_t *dma_descr, uint32_t dir
             // (dma->State is set to HAL_DMA_STATE_RESET by memset above)
             HAL_DMA_DeInit(dma);
             HAL_DMA_Init(dma);
+            // ADC DMA gets low priority
             if(dma_descr==&dma_ADC_1){
                 NVIC_SetPriority(IRQn_NONNEG(dma_irqn[dma_id]), IRQ_PRI_ADC);
-                printf("PRISET\n");
                 }
             else{
                 NVIC_SetPriority(IRQn_NONNEG(dma_irqn[dma_id]), IRQ_PRI_DMA);
