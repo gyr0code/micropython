@@ -179,8 +179,8 @@ typedef struct _pyb_obj_adc_t {
 
 uint32_t DMA_BUFFO[32];
 
-void Error_Handle(void){
-    printf("ERROR_0\n");
+void ADC_Error_Handle(void){
+    mp_raise_msg(&mp_type_OSError, "ADC error occurred.");
 }
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
@@ -190,7 +190,9 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *adch){
 
 static void adc_dma_DeInit(ADC_HandleTypeDef *adch){
     /// Fully deinit both ADC and DMA2_Stream4
-    HAL_ADC_Stop_DMA(adch);
+    if(HAL_ADC_Stop_DMA(adch) != HAL_OK){
+        ADC_Error_Handle();
+    }
     dma_deinit(&dma_ADC_1);
 }
 
@@ -266,7 +268,7 @@ STATIC void adcx_dma_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution){
     #endif
     
     if(HAL_ADC_Init(adch)!=HAL_OK){
-        Error_Handle();
+        ADC_Error_Handle();
     }
     printf("ADCDMASTART\n");
 }
@@ -532,12 +534,15 @@ STATIC mp_obj_t adc_start_dma(mp_obj_t self_in, mp_obj_t buf_in){
     mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_WRITE);
     //printf("%d",bufinfo.typecode);
 
-    if(bufinfo.typecode!=73){
+    if (bufinfo.typecode!=73){
         mp_raise_TypeError("DMA requires unsigned 32bit buffer, use array.array with 'I' typecode.");
     }
+    
+    if (HAL_ADC_Start_DMA(&self->handle, (uint32_t*)bufinfo.buf, bufinfo.len/4) != HAL_OK){
+        ADC_Error_Handle();
+    }
+    
     printf("SUCCESS!\n");
-    HAL_ADC_Start_DMA(&self->handle, (uint32_t*)bufinfo.buf, bufinfo.len/4);
-
     return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(adc_start_dma_obj, adc_start_dma);
