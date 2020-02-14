@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # This file is part of the MicroPython project, http://micropython.org/
 #
@@ -484,6 +484,33 @@ def filesystem_command(pyb, args):
         pyb.close()
         sys.exit(1)
 
+_injected_import_hook_code = """\
+import uos, uio
+class _FS:
+  class File(uio.IOBase):
+    def __init__(self):
+      self.off = 0
+    def ioctl(self, request, arg):
+      return 0
+    def readinto(self, buf):
+      buf[:] = memoryview(_injected_buf)[self.off:self.off + len(buf)]
+      self.off += len(buf)
+      return len(buf)
+  mount = umount = chdir = lambda *args: None
+  def stat(self, path):
+    if path == '_injected.mpy':
+      return tuple(0 for _ in range(10))
+    else:
+      raise OSError(-2) # ENOENT
+  def open(self, path, mode):
+    return self.File()
+uos.mount(_FS(), '/_')
+uos.chdir('/_')
+from _injected import *
+uos.umount('/_')
+del _injected_buf, _FS
+"""
+
 def main():
     import argparse
     cmd_parser = argparse.ArgumentParser(description='Run scripts on the pyboard.')
@@ -493,7 +520,9 @@ def main():
     cmd_parser.add_argument('-p', '--password', default='python', help='the telnet login password')
     cmd_parser.add_argument('-c', '--command', help='program passed in as string')
     cmd_parser.add_argument('-w', '--wait', default=0, type=int, help='seconds to wait for USB connected board to become available')
-    cmd_parser.add_argument('--follow', action='store_true', help='follow the output after running the scripts [default if no scripts given]')
+    group = cmd_parser.add_mutually_exclusive_group()
+    group.add_argument('--follow', action='store_true', help='follow the output after running the scripts [default if no scripts given]')
+    group.add_argument('--no-follow', action='store_true', help='Do not follow the output after running the scripts.')
     cmd_parser.add_argument('-f', '--filesystem', action='store_true', help='perform a filesystem action')
     cmd_parser.add_argument('files', nargs='*', help='input files')
     args = cmd_parser.parse_args()
@@ -518,7 +547,11 @@ def main():
 
         def execbuffer(buf):
             try:
-                ret, ret_err = pyb.exec_raw(buf, timeout=None, data_consumer=stdout_write_bytes)
+                if args.no_follow:
+                    pyb.exec_raw_no_follow(buf)
+                    ret_err = None
+                else:
+                    ret, ret_err = pyb.exec_raw(buf, timeout=None, data_consumer=stdout_write_bytes)
             except PyboardError as er:
                 print(er)
                 pyb.close()
@@ -534,7 +567,7 @@ def main():
         # do filesystem commands, if given
         if args.filesystem:
             filesystem_command(pyb, args.files)
-            args.files.clear()
+            del args.files[:]
 
         # run the command, if given
         if args.command is not None:
@@ -544,6 +577,9 @@ def main():
         for filename in args.files:
             with open(filename, 'rb') as f:
                 pyfile = f.read()
+                if filename.endswith('.mpy') and pyfile[0] == ord('M'):
+                    pyb.exec_('_injected_buf=' + repr(pyfile))
+                    pyfile = _injected_import_hook_code
                 execbuffer(pyfile)
 
         # exiting raw-REPL just drops to friendly-REPL mode
