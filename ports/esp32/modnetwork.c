@@ -98,9 +98,7 @@ NORETURN void _esp_exceptions(esp_err_t e) {
       case ESP_ERR_TCPIP_ADAPTER_NO_MEM:
         mp_raise_OSError(MP_ENOMEM);
       default:
-        nlr_raise(mp_obj_new_exception_msg_varg(
-          &mp_type_RuntimeError, "Wifi Unknown Error 0x%04x", e
-        ));
+        mp_raise_msg_varg( &mp_type_RuntimeError, "Wifi Unknown Error 0x%04x", e);
    }
 }
 
@@ -233,7 +231,7 @@ static esp_err_t event_handler(void *ctx, system_event_t *event) {
 
 /*void error_check(bool status, const char *msg) {
     if (!status) {
-        nlr_raise(mp_obj_new_exception_msg(&mp_type_OSError, msg));
+        mp_raise_msg(&mp_type_OSError, msg);
     }
 }
 */
@@ -441,7 +439,7 @@ STATIC mp_obj_t esp_scan(mp_obj_t self_in) {
     wifi_mode_t mode;
     ESP_EXCEPTIONS(esp_wifi_get_mode(&mode));
     if ((mode & WIFI_MODE_STA) == 0) {
-        nlr_raise(mp_obj_new_exception_msg(&mp_type_OSError, "STA must be active"));
+        mp_raise_msg(&mp_type_OSError, "STA must be active");
     }
 
     mp_obj_t list = mp_obj_new_list(0, NULL);
@@ -619,6 +617,11 @@ STATIC mp_obj_t esp_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
                         ESP_EXCEPTIONS(tcpip_adapter_set_hostname(self->if_id, s));
                         break;
                     }
+                    case QS(MP_QSTR_max_clients): {
+                        req_if = WIFI_IF_AP;
+                        cfg.ap.max_connection = mp_obj_get_int(kwargs->table[i].value);
+                        break;
+                    }
                     default:
                         goto unknown;
                 }
@@ -691,6 +694,10 @@ STATIC mp_obj_t esp_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
             const char *s;
             ESP_EXCEPTIONS(tcpip_adapter_get_hostname(self->if_id, &s));
             val = mp_obj_new_str(s, strlen(s));
+            break;
+        }
+        case QS(MP_QSTR_max_clients): {
+            val = MP_OBJ_NEW_SMALL_INT(cfg.ap.max_connection);
             break;
         }
         default:

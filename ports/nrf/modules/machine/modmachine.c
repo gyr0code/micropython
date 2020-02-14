@@ -78,8 +78,10 @@ void machine_init(void) {
         reset_cause = PYB_RESET_LOCKUP;
     } else if (state & POWER_RESETREAS_OFF_Msk) {
         reset_cause = PYB_RESET_POWER_ON;
+#if !defined(NRF9160_XXAA)
     } else if (state & POWER_RESETREAS_LPCOMP_Msk) {
         reset_cause = PYB_RESET_LPCOMP;
+#endif
     } else if (state & POWER_RESETREAS_DIF_Msk) {
         reset_cause = PYB_RESET_DIF;
 #if defined(NRF52_SERIES)
@@ -145,7 +147,7 @@ MP_DEFINE_CONST_FUN_OBJ_0(machine_reset_obj, machine_reset);
 
 STATIC mp_obj_t machine_soft_reset(void) {
     pyexec_system_exit = PYEXEC_FORCED_EXIT;
-    nlr_raise(mp_obj_new_exception(&mp_type_SystemExit));
+    mp_raise_type(&mp_type_SystemExit);
 }
 MP_DEFINE_CONST_FUN_OBJ_0(machine_soft_reset_obj, machine_soft_reset);
 

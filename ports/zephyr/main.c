@@ -41,6 +41,10 @@
 #include "lib/utils/pyexec.h"
 #include "lib/mp-readline/readline.h"
 
+#if MICROPY_VFS
+#include "extmod/vfs.h"
+#endif
+
 #ifdef TEST
 #include "lib/upytesthelper/upytesthelper.h"
 #include "lib/tinytest/tinytest.c"
@@ -48,7 +52,6 @@
 #include TEST
 #endif
 
-static char *stack_top;
 static char heap[MICROPY_HEAP_SIZE];
 
 void init_zephyr(void) {
@@ -79,9 +82,7 @@ void init_zephyr(void) {
 }
 
 int real_main(void) {
-    int stack_dummy;
-    stack_top = (char*)&stack_dummy;
-    mp_stack_set_top(stack_top);
+    mp_stack_ctrl_init();
     // Make MicroPython's stack limit somewhat smaller than full stack available
     mp_stack_set_limit(CONFIG_MAIN_STACK_SIZE - 512);
 
@@ -130,21 +131,31 @@ void gc_collect(void) {
     // pointers from CPU registers, and thus may function incorrectly.
     void *dummy;
     gc_collect_start();
-    gc_collect_root(&dummy, ((mp_uint_t)stack_top - (mp_uint_t)&dummy) / sizeof(mp_uint_t));
+    gc_collect_root(&dummy, ((mp_uint_t)MP_STATE_THREAD(stack_top) - (mp_uint_t)&dummy) / sizeof(mp_uint_t));
     gc_collect_end();
     //gc_dump_info();
 }
 
+#if !MICROPY_READER_VFS
 mp_lexer_t *mp_lexer_new_from_file(const char *filename) {
     mp_raise_OSError(ENOENT);
 }
+#endif
 
 mp_import_stat_t mp_import_stat(const char *path) {
+    #if MICROPY_VFS
+    return mp_vfs_import_stat(path);
+    #else
     return MP_IMPORT_STAT_NO_EXIST;
+    #endif
 }
 
 mp_obj_t mp_builtin_open(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs) {
+    #if MICROPY_VFS
+    return mp_vfs_open(n_args, args, kwargs);
+    #else
     return mp_const_none;
+    #endif
 }
 MP_DEFINE_CONST_FUN_OBJ_KW(mp_builtin_open_obj, 1, mp_builtin_open);
 
