@@ -74,6 +74,12 @@ uint8_t *usbd_cdc_init(usbd_cdc_state_t *cdc_in) {
     cdc->rx_buf_full = false;
     cdc->tx_need_empty_packet = 0;
     cdc->connect_state = USBD_CDC_CONNECT_STATE_DISCONNECTED;
+    if (cdc->attached_to_repl) {
+        // Default behavior is non-blocking when attached to repl
+        cdc->flow &= ~USBD_CDC_FLOWCONTROL_CTS;
+    } else {
+        cdc->flow |= USBD_CDC_FLOWCONTROL_CTS;
+    }
 
     // Return the buffer to place the first USB OUT packet
     return cdc->rx_packet_buf;
@@ -261,7 +267,7 @@ int8_t usbd_cdc_receive(usbd_cdc_state_t *cdc_in, size_t len) {
 
     // copy the incoming data into the circular buffer
     for (const uint8_t *src = cdc->rx_packet_buf, *top = cdc->rx_packet_buf + len; src < top; ++src) {
-        if (cdc->attached_to_repl && mp_interrupt_char != -1 && *src == mp_interrupt_char) {
+        if (cdc->attached_to_repl && *src == mp_interrupt_char) {
             pendsv_kbd_intr();
         } else {
             uint16_t next_put = (cdc->rx_buf_put + 1) & (USBD_CDC_RX_DATA_SIZE - 1);
@@ -290,6 +296,19 @@ int usbd_cdc_tx_half_empty(usbd_cdc_itf_t *cdc) {
         tx_waiting += USBD_CDC_TX_DATA_SIZE;
     }
     return tx_waiting <= USBD_CDC_TX_DATA_SIZE / 2;
+}
+
+// Writes only the data that fits if flow & CTS, else writes all data
+// Returns number of bytes actually written to the device
+int usbd_cdc_tx_flow(usbd_cdc_itf_t *cdc, const uint8_t *buf, uint32_t len) {
+    if (cdc->flow & USBD_CDC_FLOWCONTROL_CTS) {
+        // Only write as much as can fit in tx buffer
+        return usbd_cdc_tx(cdc, buf, len, 0);
+    } else {
+        // Never block, keep most recent data in rolling buffer
+        usbd_cdc_tx_always(cdc, buf, len);
+        return len;
+    }
 }
 
 // timout in milliseconds.
