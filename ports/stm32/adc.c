@@ -281,12 +281,12 @@ STATIC void adcx_dma_init_periph(ADC_HandleTypeDef *adch, uint32_t resolution){
     adch->Init.ScanConvMode          = DISABLE;
     adch->Init.DataAlign             = ADC_DATAALIGN_RIGHT;
     adch->Init.DMAContinuousRequests = ENABLE;
-    #endif
     
     if(HAL_ADC_Init(adch)!=HAL_OK){
         Error_Handle();
     }
-    printf("ADCDMASTART\n");
+
+    #endif
 }
 
 
@@ -524,60 +524,58 @@ STATIC mp_obj_t adc_read(mp_obj_t self_in) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_obj, adc_read);
 
-/// \method start_dma(buf)
-/// Start the ADC with the DMA. Configures the DMA to store converted 
-/// adc values in buf. The supplied buffer, buf, must be a 32 bit 
-// array.array type of unsigned int, i.e array.array("I",[0]*len)
+/// \method start_dma(dma_buf, out_buf)
+/// Start the ADC with the DMA. Configures the DMA to transfer converted 
+/// adc values in dma_buf. The supplied buffer, dma_buf, must be a 32 bit 
+/// array.array type of unsigned int, i.e array.array("I",[0]*len)
 /// to ensure compatibility with the HAL drivers for the DMA.
-// Output will be array of ADC values in range 0 to 4096.
+/// out_buf must be a 16 bit array of unsigned int with length less than
+/// or equal to dma_buf, the dma_buf values will be copied into this array.
 STATIC mp_obj_t adc_start_dma(mp_obj_t self_in, mp_obj_t buf_in, mp_obj_t buf_out){
     
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
 
+    // Check that we have started the ADC in DMA mode
     if(!self->DMA_mode){
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ADC is set up for TIMED mode."));
     }
 
-    // Deinit clashing (unused?) dma interrupts on Stream 4
+    // Deinit clashing (unused?) dma interrupts on Stream 4, required for this to work
     dma_deinit(&dma_SPI_4_TX);
     dma_deinit(&dma_SPI_5_TX);
 
     // Config the DMA handle for ADC-DMA
     static DMA_HandleTypeDef DMAHandle;
-
     dma_init(&DMAHandle, &dma_ADC_1, DMA_PERIPH_TO_MEMORY, &self->handle);
     self->handle.DMA_Handle = &DMAHandle;
     adc_config_channel(&self->handle, self->channel);
 
-    // Init bufinfo struct to supply to DMA
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_WRITE);
     self->dmabuf = bufinfo;
-    
-    //printf("%d",bufinfo.typecode);
-
     mp_buffer_info_t bufout;
     mp_get_buffer_raise(buf_out, &bufout, MP_BUFFER_WRITE);
     self->outbuf = bufout;
     
+    // Check that buffers are of the correct types and lengths
     if(bufinfo.typecode!=73){
         mp_raise_TypeError(MP_ERROR_TEXT("DMA requires unsigned 32bit buffer, use array.array with 'I' typecode"));
     }
-    
     if(bufout.typecode!=72){
         mp_raise_TypeError(MP_ERROR_TEXT("Output buffer must be unsigned 16bit buffer, use array.array with 'H' typecode"));
     }
-
     if((bufout.len/2)>(bufinfo.len/4)){
         mp_raise_ValueError(MP_ERROR_TEXT("Output buffer cannot be longer than the DMA buffer"));
     }
 
+    // Start the DMA and supply it with buf_in
     HAL_ADC_Start_DMA(&self->handle, (uint32_t*)bufinfo.buf, bufinfo.len/4);
     return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_3(adc_start_dma_obj, adc_start_dma);
 
 /// \method read_dma()
+/// Copies DMA buffer to output buffer after a callback has occurred
 STATIC mp_obj_t adc_read_dma(mp_obj_t self_in){
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
     // Enable ADC DMA conversion complete interrupt
@@ -593,8 +591,8 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in){
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_dma_obj, adc_read_dma);
 
 /// \method stop_dma()
-// Stop the ADC working with the DMA and deinit the DMA itself, allows
-// subsequent calls of read_dma will fail. 
+// Stops the DMA transferring ADC values and deinit the DMA itself,
+// subsequent calls of read_dma will fail.
 STATIC mp_obj_t adc_stop_dma(mp_obj_t self_in){
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
     if(!self->DMA_mode){
