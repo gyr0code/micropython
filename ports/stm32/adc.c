@@ -561,7 +561,15 @@ STATIC mp_obj_t adc_start_dma(mp_obj_t self_in, mp_obj_t buf_in, mp_obj_t buf_ou
     self->outbuf = bufout;
     
     if(bufinfo.typecode!=73){
-        mp_raise_TypeError(MP_ERROR_TEXT("DMA requires unsigned 32bit buffer, use array.array with 'I' typecode."));
+        mp_raise_TypeError(MP_ERROR_TEXT("DMA requires unsigned 32bit buffer, use array.array with 'I' typecode"));
+    }
+    
+    if(bufout.typecode!=72){
+        mp_raise_TypeError(MP_ERROR_TEXT("Output buffer must be unsigned 16bit buffer, use array.array with 'H' typecode"));
+    }
+
+    if((bufout.len/2)>(bufinfo.len/4)){
+        mp_raise_ValueError(MP_ERROR_TEXT("Output buffer cannot be longer than the DMA buffer"));
     }
 
     HAL_ADC_Start_DMA(&self->handle, (uint32_t*)bufinfo.buf, bufinfo.len/4);
@@ -577,8 +585,8 @@ STATIC mp_obj_t adc_read_dma(mp_obj_t self_in){
     // Briefly sleep board while we wait for a DMA callback
     HAL_PWR_EnterSLEEPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFI);
     //copy DMA buffer to output buffer
-    for(int i=0; i<((self->outbuf.len)/4); i++){
-        ((uint32_t*)self->outbuf.buf)[i] = ((uint32_t*)self->dmabuf.buf)[i];
+    for(int i=0; i<((self->outbuf.len)/2); i++){
+        ((uint16_t*)self->outbuf.buf)[i] = (uint16_t)(((uint32_t*)self->dmabuf.buf)[i]);
     }
     return mp_const_none;
 }
@@ -590,7 +598,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(adc_read_dma_obj, adc_read_dma);
 STATIC mp_obj_t adc_stop_dma(mp_obj_t self_in){
     pyb_obj_adc_t *self = MP_OBJ_TO_PTR(self_in);
     if(!self->DMA_mode){
-        //mp_raise_msg(&mp_type_OSError, "ADC is set up for TIMED mode.");
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ADC is set up for TIMED mode."));
     }
     adc_dma_DeInit(&self->handle);
 
