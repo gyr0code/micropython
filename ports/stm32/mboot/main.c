@@ -38,14 +38,12 @@
 #include "powerctrl.h"
 #include "dfu.h"
 
-// Using polling is about 10% faster than not using it (and using IRQ instead)
-// This DFU code with polling runs in about 70% of the time of the ST bootloader
+// This option selects whether to use explicit polling or IRQs for USB events.
+// In some test cases polling mode can run slightly faster, but it uses more power.
+// Polling mode will also cause failures with the mass-erase command because USB
+// events will not be serviced for the duration of the mass erase.
 // With STM32WB MCUs only non-polling/IRQ mode is supported.
-#if defined(STM32WB)
 #define USE_USB_POLLING (0)
-#else
-#define USE_USB_POLLING (1)
-#endif
 
 // Using cache probably won't make it faster because we run at a low frequency, and best
 // to keep the MCU config as minimal as possible.
@@ -441,6 +439,11 @@ static int usrbtn_state(void) {
 /******************************************************************************/
 // FLASH
 
+#if defined(STM32WB)
+#define FLASH_END FLASH_END_ADDR
+#endif
+#define APPLICATION_FLASH_LENGTH (FLASH_END + 1 - APPLICATION_ADDR)
+
 #ifndef MBOOT_SPIFLASH_LAYOUT
 #define MBOOT_SPIFLASH_LAYOUT ""
 #endif
@@ -464,31 +467,34 @@ static int usrbtn_state(void) {
 #endif
 
 static int mboot_flash_mass_erase(void) {
-    // TODO
-    return -1;
+    // Erase all flash pages after mboot.
+    int ret = flash_erase(APPLICATION_ADDR, APPLICATION_FLASH_LENGTH / sizeof(uint32_t));
+    return ret;
 }
 
 static int mboot_flash_page_erase(uint32_t addr, uint32_t *next_addr) {
     uint32_t sector_size = 0;
-    uint32_t sector = flash_get_sector_info(addr, NULL, &sector_size);
-    if (sector == 0) {
-        // Don't allow to erase the sector with this bootloader in it
+    uint32_t sector_start = 0;
+    int32_t sector = flash_get_sector_info(addr, &sector_start, &sector_size);
+    if (sector <= 0) {
+        // Don't allow to erase the sector with this bootloader in it, or invalid sectors
         dfu_context.status = DFU_STATUS_ERROR_ADDRESS;
-        dfu_context.error = MBOOT_ERROR_STR_OVERWRITE_BOOTLOADER_IDX;
+        dfu_context.error = (sector == 0) ? MBOOT_ERROR_STR_OVERWRITE_BOOTLOADER_IDX
+                                          : MBOOT_ERROR_STR_INVALID_ADDRESS_IDX;
         return -1;
     }
 
-    *next_addr = addr + sector_size;
+    *next_addr = sector_start + sector_size;
 
     // Erase the flash page.
-    int ret = flash_erase(addr, sector_size / sizeof(uint32_t));
+    int ret = flash_erase(sector_start, sector_size / sizeof(uint32_t));
     if (ret != 0) {
         return ret;
     }
 
     // Check the erase set bits to 1, at least for the first 256 bytes
     for (int i = 0; i < 64; ++i) {
-        if (((volatile uint32_t*)addr)[i] != 0xffffffff) {
+        if (((volatile uint32_t*)sector_start)[i] != 0xffffffff) {
             return -2;
         }
     }
@@ -497,11 +503,12 @@ static int mboot_flash_page_erase(uint32_t addr, uint32_t *next_addr) {
 }
 
 static int mboot_flash_write(uint32_t addr, const uint8_t *src8, size_t len) {
-    uint32_t sector = flash_get_sector_info(addr, NULL, NULL);
-    if (sector == 0) {
+    int32_t sector = flash_get_sector_info(addr, NULL, NULL);
+    if (sector <= 0) {
         // Don't allow to write the sector with this bootloader in it
         dfu_context.status = DFU_STATUS_ERROR_ADDRESS;
-        dfu_context.error = MBOOT_ERROR_STR_OVERWRITE_BOOTLOADER_IDX;
+        dfu_context.error = (sector == 0) ? MBOOT_ERROR_STR_OVERWRITE_BOOTLOADER_IDX
+                                          : MBOOT_ERROR_STR_INVALID_ADDRESS_IDX;
         return -1;
     }
 
@@ -523,7 +530,7 @@ static int mboot_flash_write(uint32_t addr, const uint8_t *src8, size_t len) {
 // Writable address space interface
 
 static int do_mass_erase(void) {
-    // TODO
+    // TODO spiflash erase ?
     return mboot_flash_mass_erase();
 }
 
@@ -664,7 +671,7 @@ void i2c_init(int addr) {
     i2c_slave_init(MBOOT_I2Cx, I2Cx_EV_IRQn, IRQ_PRI_I2C, addr);
 }
 
-int i2c_slave_process_addr_match(int rw) {
+int i2c_slave_process_addr_match(i2c_slave_t *i2c, int rw) {
     if (i2c_obj.cmd_arg_sent) {
         i2c_obj.cmd_send_arg = false;
     }
@@ -672,14 +679,14 @@ int i2c_slave_process_addr_match(int rw) {
     return 0; // ACK
 }
 
-int i2c_slave_process_rx_byte(uint8_t val) {
+int i2c_slave_process_rx_byte(i2c_slave_t *i2c, uint8_t val) {
     if (i2c_obj.cmd_buf_pos < sizeof(i2c_obj.cmd_buf)) {
         i2c_obj.cmd_buf[i2c_obj.cmd_buf_pos++] = val;
     }
     return 0; // ACK
 }
 
-void i2c_slave_process_rx_end(void) {
+void i2c_slave_process_rx_end(i2c_slave_t *i2c) {
     if (i2c_obj.cmd_buf_pos == 0) {
         return;
     }
@@ -764,7 +771,7 @@ void i2c_slave_process_rx_end(void) {
     i2c_obj.cmd_arg_sent = false;
 }
 
-uint8_t i2c_slave_process_tx_byte(void) {
+uint8_t i2c_slave_process_tx_byte(i2c_slave_t *i2c) {
     if (i2c_obj.cmd_send_arg) {
         i2c_obj.cmd_arg_sent = true;
         return i2c_obj.cmd_arg;
@@ -773,6 +780,9 @@ uint8_t i2c_slave_process_tx_byte(void) {
     } else {
         return 0;
     }
+}
+
+void i2c_slave_process_tx_end(i2c_slave_t *i2c) {
 }
 
 #endif // defined(MBOOT_I2C_SCL)
@@ -792,16 +802,19 @@ static int dfu_process_dnload(void) {
     int ret = -1;
     if (dfu_context.wBlockNum == 0) {
         // download control commands
-        if (dfu_context.wLength >= 1 && dfu_context.buf[0] == 0x41) {
+        if (dfu_context.wLength >= 1 && dfu_context.buf[0] == DFU_CMD_DNLOAD_ERASE) {
             if (dfu_context.wLength == 1) {
                 // mass erase
                 ret = do_mass_erase();
+                if (ret != 0) {
+                    dfu_context.cmd = DFU_CMD_NONE;
+                }
             } else if (dfu_context.wLength == 5) {
                 // erase page
                 uint32_t next_addr;
                 ret = do_page_erase(get_le32(&dfu_context.buf[1]), &next_addr);
             }
-        } else if (dfu_context.wLength >= 1 && dfu_context.buf[0] == 0x21) {
+        } else if (dfu_context.wLength >= 1 && dfu_context.buf[0] == DFU_CMD_DNLOAD_SET_ADDRESS) {
             if (dfu_context.wLength == 5) {
                 // set address
                 dfu_context.addr = get_le32(&dfu_context.buf[1]);
@@ -885,13 +898,19 @@ static int dfu_handle_tx(int cmd, int arg, int len, uint8_t *buf, int max_len) {
             default:
                 dfu_context.state = DFU_STATE_BUSY;
         }
-        buf[0] = dfu_context.status; // bStatus
-        buf[1] = 0; // bwPollTimeout (ms)
-        buf[2] = 0; // bwPollTimeout (ms)
-        buf[3] = 0; // bwPollTimeout (ms)
-        buf[4] = dfu_context.state; // bState
-        buf[5] = dfu_context.error; // iString
+        buf[0] = dfu_context.status;          // bStatus
+        buf[1] = 0;                           // bwPollTimeout_lsb (ms)
+        buf[2] = 0;                           // bwPollTimeout     (ms)
+        buf[3] = 0;                           // bwPollTimeout_msb (ms)
+        buf[4] = dfu_context.state;           // bState
+        buf[5] = dfu_context.error;           // iString
+        // Clear errors now they've been sent
+        dfu_context.status = DFU_STATUS_OK;
+        dfu_context.error = 0;
         return 6;
+    } else if (cmd == DFU_GETSTATE && len == 1) {
+        buf[0] = dfu_context.state; // bState
+        return 1;
     }
     return -1;
 }

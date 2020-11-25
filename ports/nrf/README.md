@@ -41,8 +41,10 @@ This is a port of MicroPython to the Nordic Semiconductor nRF series of chips.
   * [PCA10056](http://www.nordicsemi.com/eng/Products/nRF52840-Preview-DK)
   * [PCA10059](https://www.nordicsemi.com/Software-and-Tools/Development-Kits/nRF52840-Dongle)
   * [Particle Xenon](https://docs.particle.io/xenon/)
+  * [nRF52840 MDK USB Dongle](boards/nrf52840-mdk-usb-dongle/README.md)
 * nRF9160
   * [PCA10090](https://www.nordicsemi.com/Software-and-Tools/Development-Kits/nRF9160-DK)
+  * [Actinius Icarus](https://www.actinius.com/icarus)
 
 ## Compile and Flash
 
@@ -135,6 +137,7 @@ pca10056             | s140                    | Peripheral and Central | [Segge
 pca10059             | s140                    | Peripheral and Central | Manual, SWDIO and SWCLK solder points on the sides.
 particle_xenon       | s140                    | Peripheral and Central | [Black Magic Probe](#black-magic-probe-targets)
 pca10090             | None (bsdlib.a)         | None (LTE/GNSS)        | [Segger](#segger-targets)
+actinius_icarus      | None (bsdlib.a)         | None (LTE/GNSS)        | [Segger](#segger-targets)
 
 ## IDAP-M/IDAP-Link Targets
 
@@ -184,3 +187,12 @@ Other:
 * nRF UART application for IPhone/Android
 
 WebBluetooth mode can also be configured by editing `bluetooth_conf.h` and set `BLUETOOTH_WEBBLUETOOTH_REPL` to 1. This will alternate advertisement between Eddystone URL and regular connectable advertisement. The Eddystone URL will point the phone or PC to download [WebBluetooth REPL](https://aykevl.nl/apps/nus/) (experimental), which subsequently can be used to connect to the Bluetooth REPL from the PC or Phone browser.
+
+
+## Pin numbering scheme for nrf52840-based boards
+
+Software Pins 0-31 correspond to physical pins 0.x and software Pins 32-47
+correspond to physical pins 1.x.
+
+Example:
+`Pin(47)` would be 1.15 on the PCA10059

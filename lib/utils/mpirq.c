@@ -31,6 +31,8 @@
 #include "py/gc.h"
 #include "lib/utils/mpirq.h"
 
+#if MICROPY_ENABLE_SCHEDULER
+
 /******************************************************************************
  DECLARE PUBLIC DATA
  ******************************************************************************/
@@ -51,12 +53,16 @@ const mp_arg_t mp_irq_init_args[] = {
 
 mp_irq_obj_t *mp_irq_new(const mp_irq_methods_t *methods, mp_obj_t parent) {
     mp_irq_obj_t *self = m_new0(mp_irq_obj_t, 1);
+    mp_irq_init(self, methods, parent);
+    return self;
+}
+
+void mp_irq_init(mp_irq_obj_t *self, const mp_irq_methods_t *methods, mp_obj_t parent) {
     self->base.type = &mp_irq_type;
     self->methods = (mp_irq_methods_t *)methods;
     self->parent = parent;
     self->handler = mp_const_none;
     self->ishard = false;
-    return self;
 }
 
 void mp_irq_handler(mp_irq_obj_t *self) {
@@ -125,3 +131,5 @@ const mp_obj_type_t mp_irq_type = {
     .call = mp_irq_call,
     .locals_dict = (mp_obj_dict_t *)&mp_irq_locals_dict,
 };
+
+#endif // MICROPY_ENABLE_SCHEDULER

@@ -43,11 +43,19 @@
 #define MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE (0)
 #endif
 
-#ifndef MICROPY_PY_BLUETOOTH_GATTS_ON_READ_CALLBACK
-#define MICROPY_PY_BLUETOOTH_GATTS_ON_READ_CALLBACK (0)
+#ifndef MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS
+// This can be enabled if the BLE stack runs entirely in scheduler context
+// and therefore is able to call directly into the VM to run Python callbacks.
+#define MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS (0)
+#endif
+
+// A port can optionally enable support for L2CAP "Connection Oriented Channels".
+#ifndef MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+#define MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS (0)
 #endif
 
 // This is used to protect the ringbuffer.
+// A port may no-op this if MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS is enabled.
 #ifndef MICROPY_PY_BLUETOOTH_ENTER
 #define MICROPY_PY_BLUETOOTH_ENTER mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
 #define MICROPY_PY_BLUETOOTH_EXIT MICROPY_END_ATOMIC_SECTION(atomic_state);
@@ -68,6 +76,7 @@
 #define MP_BLUETOOTH_CHARACTERISTIC_FLAG_WRITE_NO_RESPONSE (1 << 2)
 #define MP_BLUETOOTH_CHARACTERISTIC_FLAG_WRITE    (1 << 3)
 #define MP_BLUETOOTH_CHARACTERISTIC_FLAG_NOTIFY   (1 << 4)
+#define MP_BLUETOOTH_CHARACTERISTIC_FLAG_INDICATE (1 << 5)
 
 // For mp_bluetooth_gattc_write, the mode parameter
 #define MP_BLUETOOTH_WRITE_MODE_NO_RESPONSE     (0)
@@ -77,15 +86,6 @@
 #define MP_BLUETOOTH_UUID_TYPE_16  (2)
 #define MP_BLUETOOTH_UUID_TYPE_32  (4)
 #define MP_BLUETOOTH_UUID_TYPE_128 (16)
-
-// Address types (for the addr_type params).
-// Ports will need to map these to their own values.
-#define MP_BLUETOOTH_ADDR_PUBLIC                        (0x00)  // Public (identity) address. (Same as NimBLE and NRF SD)
-#define MP_BLUETOOTH_ADDR_RANDOM_STATIC                 (0x01)  // Random static (identity) address. (Same as NimBLE and NRF SD)
-#define MP_BLUETOOTH_ADDR_PUBLIC_ID                     (0x02)  // (Same as NimBLE)
-#define MP_BLUETOOTH_ADDR_RANDOM_ID                     (0x03)  // (Same as NimBLE)
-#define MP_BLUETOOTH_ADDR_RANDOM_PRIVATE_RESOLVABLE     (0x12) // Random private resolvable address. (NRF SD 0x02)
-#define MP_BLUETOOTH_ADDR_RANDOM_PRIVATE_NON_RESOLVABLE (0x13) // Random private non-resolvable address. (NRF SD 0x03)
 
 // Event codes for the IRQ handler.
 #define MP_BLUETOOTH_IRQ_CENTRAL_CONNECT                (1)
@@ -107,6 +107,18 @@
 #define MP_BLUETOOTH_IRQ_GATTC_WRITE_DONE               (17)
 #define MP_BLUETOOTH_IRQ_GATTC_NOTIFY                   (18)
 #define MP_BLUETOOTH_IRQ_GATTC_INDICATE                 (19)
+#define MP_BLUETOOTH_IRQ_GATTS_INDICATE_DONE            (20)
+#define MP_BLUETOOTH_IRQ_MTU_EXCHANGED                  (21)
+#define MP_BLUETOOTH_IRQ_L2CAP_ACCEPT                   (22)
+#define MP_BLUETOOTH_IRQ_L2CAP_CONNECT                  (23)
+#define MP_BLUETOOTH_IRQ_L2CAP_DISCONNECT               (24)
+#define MP_BLUETOOTH_IRQ_L2CAP_RECV                     (25)
+#define MP_BLUETOOTH_IRQ_L2CAP_SEND_READY               (26)
+
+#define MP_BLUETOOTH_ADDRESS_MODE_PUBLIC (0)
+#define MP_BLUETOOTH_ADDRESS_MODE_RANDOM (1)
+#define MP_BLUETOOTH_ADDRESS_MODE_RPA (2)
+#define MP_BLUETOOTH_ADDRESS_MODE_NRPA (3)
 
 /*
 These aren't included in the module for space reasons, but can be used
@@ -132,9 +144,16 @@ _IRQ_GATTC_READ_DONE = const(16)
 _IRQ_GATTC_WRITE_DONE = const(17)
 _IRQ_GATTC_NOTIFY = const(18)
 _IRQ_GATTC_INDICATE = const(19)
+_IRQ_GATTS_INDICATE_DONE = const(20)
+_IRQ_MTU_EXCHANGED = const(21)
+_IRQ_L2CAP_ACCEPT = const(22)
+_IRQ_L2CAP_CONNECT = const(23)
+_IRQ_L2CAP_DISCONNECT = const(24)
+_IRQ_L2CAP_RECV = const(25)
+_IRQ_L2CAP_SEND_READY = const(26)
 */
 
-// Common UUID type.
+// bluetooth.UUID type.
 // Ports are expected to map this to their own internal UUID types.
 // Internally the UUID data is little-endian, but the user should only
 // ever see this if they use the buffer protocol, e.g. in order to
@@ -145,6 +164,8 @@ typedef struct {
     uint8_t type;
     uint8_t data[16];
 } mp_obj_bluetooth_uuid_t;
+
+extern const mp_obj_type_t mp_type_bluetooth_uuid;
 
 //////////////////////////////////////////////////////////////
 // API implemented by ports (i.e. called from modbluetooth.c):
@@ -170,8 +191,11 @@ void mp_bluetooth_deinit(void);
 // Returns true when the Bluetooth stack is active.
 bool mp_bluetooth_is_active(void);
 
-// Gets the MAC addr of this device in big-endian format.
-void mp_bluetooth_get_device_addr(uint8_t *addr);
+// Gets the current address of this device in big-endian format.
+void mp_bluetooth_get_current_address(uint8_t *addr_type, uint8_t *addr);
+
+// Sets the addressing mode to use.
+void mp_bluetooth_set_address_mode(uint8_t addr_mode);
 
 // Get or set the GAP device name that will be used by service 0x1800, characteristic 0x2a00.
 size_t mp_bluetooth_gap_get_device_name(const uint8_t **buf);
@@ -199,7 +223,7 @@ int mp_bluetooth_gatts_write(uint16_t value_handle, const uint8_t *value, size_t
 // Notify the central that it should do a read.
 int mp_bluetooth_gatts_notify(uint16_t conn_handle, uint16_t value_handle);
 // Notify the central, including a data payload. (Note: does not set the gatts db value).
-int mp_bluetooth_gatts_notify_send(uint16_t conn_handle, uint16_t value_handle, const uint8_t *value, size_t *value_len);
+int mp_bluetooth_gatts_notify_send(uint16_t conn_handle, uint16_t value_handle, const uint8_t *value, size_t value_len);
 // Indicate the central.
 int mp_bluetooth_gatts_indicate(uint16_t conn_handle, uint16_t value_handle);
 
@@ -210,9 +234,13 @@ int mp_bluetooth_gatts_set_buffer(uint16_t value_handle, size_t len, bool append
 // Disconnect from a central or peripheral.
 int mp_bluetooth_gap_disconnect(uint16_t conn_handle);
 
+// Set/get the MTU that we will respond to a MTU exchange with.
+int mp_bluetooth_get_preferred_mtu(void);
+int mp_bluetooth_set_preferred_mtu(uint16_t mtu);
+
 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
 // Start a discovery (scan). Set duration to zero to run continuously.
-int mp_bluetooth_gap_scan_start(int32_t duration_ms, int32_t interval_us, int32_t window_us);
+int mp_bluetooth_gap_scan_start(int32_t duration_ms, int32_t interval_us, int32_t window_us, bool active_scan);
 
 // Stop discovery (if currently active).
 int mp_bluetooth_gap_scan_stop(void);
@@ -234,7 +262,18 @@ int mp_bluetooth_gattc_read(uint16_t conn_handle, uint16_t value_handle);
 
 // Write the value to the remote peripheral.
 int mp_bluetooth_gattc_write(uint16_t conn_handle, uint16_t value_handle, const uint8_t *value, size_t *value_len, unsigned int mode);
-#endif
+
+// Initiate MTU exchange for a specific connection using the preferred MTU.
+int mp_bluetooth_gattc_exchange_mtu(uint16_t conn_handle);
+#endif // MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+
+#if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+int mp_bluetooth_l2cap_listen(uint16_t psm, uint16_t mtu);
+int mp_bluetooth_l2cap_connect(uint16_t conn_handle, uint16_t psm, uint16_t mtu);
+int mp_bluetooth_l2cap_disconnect(uint16_t conn_handle, uint16_t cid);
+int mp_bluetooth_l2cap_send(uint16_t conn_handle, uint16_t cid, const uint8_t *buf, size_t len, bool *stalled);
+int mp_bluetooth_l2cap_recvinto(uint16_t conn_handle, uint16_t cid, uint8_t *buf, size_t *len);
+#endif // MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 
 /////////////////////////////////////////////////////////////////////////////
 // API implemented by modbluetooth (called by port-specific implementations):
@@ -245,10 +284,14 @@ void mp_bluetooth_gap_on_connected_disconnected(uint8_t event, uint16_t conn_han
 // Call this when a characteristic is written to.
 void mp_bluetooth_gatts_on_write(uint16_t conn_handle, uint16_t value_handle);
 
-#if MICROPY_PY_BLUETOOTH_GATTS_ON_READ_CALLBACK
+// Call this when an acknowledgment is received for an indication.
+void mp_bluetooth_gatts_on_indicate_complete(uint16_t conn_handle, uint16_t value_handle, uint8_t status);
+
 // Call this when a characteristic is read from. Return false to deny the read.
 bool mp_bluetooth_gatts_on_read_request(uint16_t conn_handle, uint16_t value_handle);
-#endif
+
+// Call this when an MTU exchange completes.
+void mp_bluetooth_gatts_on_mtu_exchanged(uint16_t conn_handle, uint16_t value);
 
 #if MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
 // Notify modbluetooth that scan has finished, either timeout, manually, or by some other action (e.g. connecting).
@@ -270,15 +313,19 @@ void mp_bluetooth_gattc_on_descriptor_result(uint16_t conn_handle, uint16_t hand
 void mp_bluetooth_gattc_on_discover_complete(uint8_t event, uint16_t conn_handle, uint16_t status);
 
 // Notify modbluetooth that a read has completed with data (or notify/indicate data available, use `event` to disambiguate).
-// Note: these functions are to be called in a group protected by MICROPY_PY_BLUETOOTH_ENTER/EXIT.
-// _start returns the number of bytes to submit to the calls to _chunk, followed by a call to _end.
-size_t mp_bluetooth_gattc_on_data_available_start(uint8_t event, uint16_t conn_handle, uint16_t value_handle, size_t data_len, mp_uint_t *atomic_state_out);
-void mp_bluetooth_gattc_on_data_available_chunk(const uint8_t *data, size_t data_len);
-void mp_bluetooth_gattc_on_data_available_end(mp_uint_t atomic_state);
+void mp_bluetooth_gattc_on_data_available(uint8_t event, uint16_t conn_handle, uint16_t value_handle, const uint8_t **data, uint16_t *data_len, size_t num);
 
 // Notify modbluetooth that a read or write operation has completed.
 void mp_bluetooth_gattc_on_read_write_status(uint8_t event, uint16_t conn_handle, uint16_t value_handle, uint16_t status);
-#endif
+#endif // MICROPY_PY_BLUETOOTH_ENABLE_CENTRAL_MODE
+
+#if MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
+mp_int_t mp_bluetooth_gattc_on_l2cap_accept(uint16_t conn_handle, uint16_t cid, uint16_t psm, uint16_t our_mtu, uint16_t peer_mtu);
+void mp_bluetooth_gattc_on_l2cap_connect(uint16_t conn_handle, uint16_t cid, uint16_t psm, uint16_t our_mtu, uint16_t peer_mtu);
+void mp_bluetooth_gattc_on_l2cap_disconnect(uint16_t conn_handle, uint16_t cid, uint16_t psm, uint16_t status);
+void mp_bluetooth_gattc_on_l2cap_send_ready(uint16_t conn_handle, uint16_t cid, uint8_t status);
+void mp_bluetooth_gattc_on_l2cap_recv(uint16_t conn_handle, uint16_t cid);
+#endif // MICROPY_PY_BLUETOOTH_ENABLE_L2CAP_CHANNELS
 
 // For stacks that don't manage attribute value data (currently all of them), helpers
 // to store this in a map, keyed by value handle.

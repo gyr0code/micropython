@@ -38,9 +38,7 @@
 #include <usb/usb_device.h>
 #endif
 
-#ifdef CONFIG_FLASH_MAP
 #include <storage/flash_map.h>
-#endif
 
 #include "py/mperrno.h"
 #include "py/compile.h"
@@ -55,6 +53,7 @@
 #include "extmod/vfs.h"
 #endif
 
+#include "modmachine.h"
 #include "modzephyr.h"
 
 #ifdef TEST
@@ -166,6 +165,11 @@ soft_reset:
     }
 
     printf("soft reboot\n");
+
+    #if MICROPY_PY_MACHINE
+    machine_pin_deinit();
+    #endif
+
     goto soft_reset;
 
     return 0;
